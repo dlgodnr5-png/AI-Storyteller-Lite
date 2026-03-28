@@ -194,13 +194,14 @@ type SlideMotionType = 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right' | 'pan_
 type RenderResolution = 'sd' | 'hd' | 'fhd';
 type SubtitlePosition = 'bottom' | 'middle';
 type SubtitlePreset = 'shorts' | 'docu' | 'lecture';
-type SubtitleEntryAnimation = 'none' | 'fade' | 'pop';
+type SubtitleEntryAnimation = 'none' | 'fade' | 'pop' | 'slide_up' | 'slide_down' | 'slide_left' | 'slide_right';
 type SubtitleHighlightStrength = 'low' | 'medium' | 'high';
 type SubtitleSegment = { start: number; end: number; text: string; lines: string[]; cut: number };
 type SavedSubtitleTemplate = {
   name: string;
   subtitlePreset: SubtitlePreset;
   subtitlePosition: SubtitlePosition;
+  subtitleGridPosition?: number;
   subtitleMaxChars: number;
   subtitleWordHighlight: boolean;
   subtitleEntryAnimation: SubtitleEntryAnimation;
@@ -325,6 +326,19 @@ const getRenderDimensions = (ratio: string, resolution: RenderResolution) => {
     width: Math.round(base.width * preset.scale),
     height: Math.round(base.height * preset.scale),
   };
+};
+
+const gridPositionToPercent = (gridPosition: number) => {
+  const clamped = Math.min(10, Math.max(1, gridPosition));
+  const min = 10;
+  const max = 90;
+  return min + ((clamped - 1) / 9) * (max - min);
+};
+
+const ratioToCss = (ratio: string) => {
+  const [w, h] = ratio.split(':').map(Number);
+  if (!w || !h) return '16 / 9';
+  return `${w} / ${h}`;
 };
 
 const interpolate = (start: number, end: number, t: number) => start + (end - start) * t;
@@ -470,6 +484,7 @@ const drawSubtitleOverlay = (
   height: number,
   lines: string[],
   position: SubtitlePosition,
+  gridPosition?: number,
   options?: {
     preset: SubtitlePreset;
     highlightWord?: string;
@@ -527,13 +542,23 @@ const drawSubtitleOverlay = (
   const fontSize = Math.round(Math.min(width, height) * preset.fontScale);
   const lineHeight = Math.round(fontSize * 1.34);
   const blockHeight = lineHeight * rendered.length + 28;
-  const y = position === 'middle' ? (height - blockHeight) / 2 : height - blockHeight - Math.round(height * 0.08);
+  const defaultGrid = position === 'middle' ? 5 : 9;
+  const clampedGrid = Math.min(10, Math.max(1, Number(gridPosition || defaultGrid)));
+  const safeTop = Math.round(height * 0.06);
+  const safeBottom = Math.round(height * 0.06);
+  const usableHeight = Math.max(0, height - safeTop - safeBottom - blockHeight);
+  const y = safeTop + ((clampedGrid - 1) / 9) * usableHeight;
 
   ctx.save();
   if (entryAnimation !== 'none') {
     const alpha = entryAnimation === 'fade' ? Math.min(1, progress * 3.2) : Math.min(1, 0.2 + progress * 2.8);
     const scale = entryAnimation === 'pop' ? 0.92 + Math.min(1, progress * 3) * 0.08 : 1;
     ctx.globalAlpha = alpha;
+    const movePx = Math.round(Math.min(width, height) * (1 - Math.min(1, progress * 3.2)) * 0.12);
+    if (entryAnimation === 'slide_up') ctx.translate(0, movePx);
+    if (entryAnimation === 'slide_down') ctx.translate(0, -movePx);
+    if (entryAnimation === 'slide_left') ctx.translate(movePx, 0);
+    if (entryAnimation === 'slide_right') ctx.translate(-movePx, 0);
     if (scale !== 1) {
       ctx.translate(width / 2, height / 2);
       ctx.scale(scale, scale);
@@ -615,108 +640,24 @@ const PRESET_SAMPLE_TEXT: Record<SubtitlePreset, string> = {
 };
 
 const BUILTIN_SUBTITLE_TEMPLATES: BuiltinSubtitleTemplate[] = [
-  {
-    id: 'promo-product',
-    name: '상품광고',
-    description: '강한 CTA, 빠른 강조, 전환 유도',
-    sample: '지금 안 보면 손해! 오늘만 특가',
-    config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleMaxChars: 18, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'pop', subtitleKeywords: '한정,특가,무료,지금,혜택', subtitleUsePerCutKeywords: false },
-  },
-  {
-    id: 'news-urgent',
-    name: '뉴스 브리핑',
-    description: '신뢰감 있는 헤드라인형',
-    sample: '속보: 핵심 내용 30초 요약',
-    config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleMaxChars: 26, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'fade', subtitleKeywords: '속보,현장,단독,브리핑,핵심', subtitleUsePerCutKeywords: false },
-  },
-  {
-    id: 'comedy-skit',
-    name: '코믹 숏폼',
-    description: '리액션 중심, 강한 단어 하이라이트',
-    sample: '이 장면에서 다들 터졌습니다',
-    config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleMaxChars: 20, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'pop', subtitleKeywords: '폭소,레전드,미친,반전,웃김', subtitleUsePerCutKeywords: true },
-  },
-  {
-    id: 'pet-animal',
-    name: '동물/펫',
-    description: '귀여움 강조, 짧고 또렷한 문장',
-    sample: '심쿵 포인트 모아보기',
-    config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleMaxChars: 19, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '귀여움,심쿵,댕댕이,냥냥이,힐링', subtitleUsePerCutKeywords: true },
-  },
-  {
-    id: 'senior-health',
-    name: '시니어 정보',
-    description: '가독성 우선, 안정적인 템포',
-    sample: '천천히, 정확하게 핵심 전달',
-    config: { subtitlePreset: 'lecture', subtitlePosition: 'middle', subtitleMaxChars: 30, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '건강,주의,습관,관리,예방', subtitleUsePerCutKeywords: false },
-  },
-  {
-    id: 'motivation',
-    name: '동기부여',
-    description: '강조 단어 중심 임팩트',
-    sample: '딱 1년만, 인생이 바뀝니다',
-    config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleMaxChars: 22, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'pop', subtitleKeywords: '도전,성공,습관,목표,실행', subtitleUsePerCutKeywords: true },
-  },
-  {
-    id: 'knowledge-bite',
-    name: '지식/교양',
-    description: '정보 전달 최적화',
-    sample: '모르면 손해보는 핵심 상식',
-    config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleMaxChars: 27, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '핵심,원리,사실,정리,요약', subtitleUsePerCutKeywords: false },
-  },
-  {
-    id: 'review-tech',
-    name: '리뷰/언박싱',
-    description: '기능/가격/결론 강조',
-    sample: '실사용 기준으로 딱 정리',
-    config: { subtitlePreset: 'lecture', subtitlePosition: 'bottom', subtitleMaxChars: 24, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'fade', subtitleKeywords: '장점,단점,가격,성능,결론', subtitleUsePerCutKeywords: true },
-  },
-  {
-    id: 'vlog-daily',
-    name: '브이로그',
-    description: '자연스러운 흐름, 감성 유지',
-    sample: '소소하지만 확실한 하루 기록',
-    config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleMaxChars: 25, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'fade', subtitleKeywords: '일상,기록,루틴,감성,하루', subtitleUsePerCutKeywords: false },
-  },
-  {
-    id: 'interview-talk',
-    name: '인터뷰',
-    description: '질문-답변 구조 가독성 최적화',
-    sample: '질문 하나로 바뀐 관점',
-    config: { subtitlePreset: 'lecture', subtitlePosition: 'middle', subtitleMaxChars: 28, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '질문,답변,경험,핵심,인사이트', subtitleUsePerCutKeywords: false },
-  },
-  {
-    id: 'crime-issue',
-    name: '사건/이슈',
-    description: '긴장감, 핵심 단어 강한 강조',
-    sample: '순식간에 벌어진 충격 상황',
-    config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleMaxChars: 21, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'pop', subtitleKeywords: '충격,단독,증거,현장,진실', subtitleUsePerCutKeywords: true },
-  },
-  {
-    id: 'healing-emotion',
-    name: '감성/힐링',
-    description: '부드러운 등장, 따뜻한 톤',
-    sample: '마음이 편해지는 30초',
-    config: { subtitlePreset: 'docu', subtitlePosition: 'middle', subtitleMaxChars: 24, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'fade', subtitleKeywords: '힐링,감성,위로,따뜻함,휴식', subtitleUsePerCutKeywords: false },
-  },
-  {
-    id: 'mystery-horror',
-    name: '미스터리/공포',
-    description: '암전 분위기, 강한 키워드',
-    sample: '절대 혼자 보지 마세요',
-    config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleMaxChars: 20, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'pop', subtitleKeywords: '미스터리,공포,소름,경고,반전', subtitleUsePerCutKeywords: true },
-  },
-  {
-    id: 'kids-family',
-    name: '키즈/패밀리',
-    description: '선명하고 쉬운 문장, 밝은 템포',
-    sample: '아이도 바로 이해하는 설명',
-    config: { subtitlePreset: 'lecture', subtitlePosition: 'bottom', subtitleMaxChars: 22, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '재미,배움,놀이,친구,가족', subtitleUsePerCutKeywords: false },
-  },
+  { id: 'promo-product', name: '상품광고', description: '강한 CTA, 빠른 강조, 전환 유도', sample: '지금 안 보면 손해! 오늘만 특가', previewImage: '/subtitle_templates/09. 상품.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleGridPosition: 9, subtitleMaxChars: 18, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_up', subtitleKeywords: '한정,특가,무료,지금,혜택', subtitleUsePerCutKeywords: false } },
+  { id: 'news-urgent', name: '뉴스 브리핑', description: '신뢰감 있는 헤드라인형', sample: '속보: 핵심 내용 30초 요약', previewImage: '/subtitle_templates/07. MBC뉴스.png', config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 26, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'fade', subtitleKeywords: '속보,현장,단독,브리핑,핵심', subtitleUsePerCutKeywords: false } },
+  { id: 'comedy-skit', name: '코믹 숏폼', description: '리액션 중심, 강한 단어 하이라이트', sample: '이 장면에서 다들 터졌습니다', previewImage: '/subtitle_templates/02. 일상쇼츠.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleGridPosition: 6, subtitleMaxChars: 20, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'pop', subtitleKeywords: '폭소,레전드,미친,반전,웃김', subtitleUsePerCutKeywords: true } },
+  { id: 'pet-animal', name: '동물/펫', description: '귀여움 강조, 짧고 또렷한 문장', sample: '심쿵 포인트 모아보기', previewImage: '/subtitle_templates/10. 동물.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 19, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'slide_right', subtitleKeywords: '귀여움,심쿵,댕댕이,냥냥이,힐링', subtitleUsePerCutKeywords: true } },
+  { id: 'senior-health', name: '시니어 정보', description: '가독성 우선, 안정적인 템포', sample: '천천히, 정확하게 핵심 전달', previewImage: '/subtitle_templates/04. 시니어.png', config: { subtitlePreset: 'lecture', subtitlePosition: 'middle', subtitleGridPosition: 6, subtitleMaxChars: 30, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '건강,주의,습관,관리,예방', subtitleUsePerCutKeywords: false } },
+  { id: 'motivation', name: '동기부여', description: '강조 단어 중심 임팩트', sample: '딱 1년만, 인생이 바뀝니다', previewImage: '/subtitle_templates/12. 동기부여.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleGridPosition: 5, subtitleMaxChars: 22, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_left', subtitleKeywords: '도전,성공,습관,목표,실행', subtitleUsePerCutKeywords: true } },
+  { id: 'knowledge-bite', name: '지식/교양', description: '정보 전달 최적화', sample: '모르면 손해보는 핵심 상식', previewImage: '/subtitle_templates/11. 지식.png', config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 27, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '핵심,원리,사실,정리,요약', subtitleUsePerCutKeywords: false } },
+  { id: 'review-tech', name: '리뷰/언박싱', description: '기능/가격/결론 강조', sample: '실사용 기준으로 딱 정리', previewImage: '/subtitle_templates/05. 강의.png', config: { subtitlePreset: 'lecture', subtitlePosition: 'bottom', subtitleGridPosition: 9, subtitleMaxChars: 24, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_up', subtitleKeywords: '장점,단점,가격,성능,결론', subtitleUsePerCutKeywords: true } },
+  { id: 'vlog-daily', name: '브이로그', description: '자연스러운 흐름, 감성 유지', sample: '소소하지만 확실한 하루 기록', previewImage: '/subtitle_templates/03 전체화면(가운데).png', config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 25, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'slide_down', subtitleKeywords: '일상,기록,루틴,감성,하루', subtitleUsePerCutKeywords: false } },
+  { id: 'interview-talk', name: '인터뷰', description: '질문-답변 구조 가독성 최적화', sample: '질문 하나로 바뀐 관점', previewImage: '/subtitle_templates/01.정보쇼츠.png', config: { subtitlePreset: 'lecture', subtitlePosition: 'middle', subtitleGridPosition: 6, subtitleMaxChars: 28, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '질문,답변,경험,핵심,인사이트', subtitleUsePerCutKeywords: false } },
+  { id: 'crime-issue', name: '사건/이슈', description: '긴장감, 핵심 단어 강한 강조', sample: '순식간에 벌어진 충격 상황', previewImage: '/subtitle_templates/13. 사건.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 21, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_up', subtitleKeywords: '충격,단독,증거,현장,진실', subtitleUsePerCutKeywords: true } },
+  { id: 'healing-emotion', name: '감성/힐링', description: '부드러운 등장, 따뜻한 톤', sample: '마음이 편해지는 30초', previewImage: '/subtitle_templates/08. 검은바탕.png', config: { subtitlePreset: 'docu', subtitlePosition: 'middle', subtitleGridPosition: 6, subtitleMaxChars: 24, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'fade', subtitleKeywords: '힐링,감성,위로,따뜻함,휴식', subtitleUsePerCutKeywords: false } },
+  { id: 'mystery-horror', name: '미스터리/공포', description: '암전 분위기, 강한 키워드', sample: '절대 혼자 보지 마세요', previewImage: '/subtitle_templates/14. 이슈.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleGridPosition: 5, subtitleMaxChars: 20, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_left', subtitleKeywords: '미스터리,공포,소름,경고,반전', subtitleUsePerCutKeywords: true } },
+  { id: 'kids-family', name: '키즈/패밀리', description: '선명하고 쉬운 문장, 밝은 템포', sample: '아이도 바로 이해하는 설명', previewImage: '/subtitle_templates/06. 이슈.png', config: { subtitlePreset: 'lecture', subtitlePosition: 'bottom', subtitleGridPosition: 9, subtitleMaxChars: 22, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'slide_right', subtitleKeywords: '재미,배움,놀이,친구,가족', subtitleUsePerCutKeywords: false } },
 ];
 
 const getBuiltinTemplatePreview = (template: BuiltinSubtitleTemplate) => {
-  return template.previewImage || `/subtitle_templates/${template.id}.jpg`;
+  return encodeURI(template.previewImage || `/subtitle_templates/${template.id}.jpg`);
 };
 
 const parseKeywordSet = (raw: string) => {
@@ -842,6 +783,7 @@ export default function App() {
       subtitleEnabled: true,
       subtitleMaxChars: 24,
       subtitlePosition: 'bottom' as SubtitlePosition,
+      subtitleGridPosition: 9,
       subtitlePreset: 'shorts' as SubtitlePreset,
       subtitleWordHighlight: true,
       subtitleHighlightStrength: 'medium' as SubtitleHighlightStrength,
@@ -1862,6 +1804,7 @@ ${stylePrompt}
                 height,
                 subtitle.lines,
                 ui.finalVideo.subtitlePosition,
+                ui.finalVideo.subtitleGridPosition,
                 {
                   preset: ui.finalVideo.subtitlePreset,
                   highlightWord,
@@ -1940,6 +1883,7 @@ ${stylePrompt}
     const templateMap: Record<SubtitlePreset, {
       subtitlePreset: SubtitlePreset;
       subtitlePosition: SubtitlePosition;
+      subtitleGridPosition: number;
       subtitleMaxChars: number;
       subtitleWordHighlight: boolean;
       subtitleHighlightStrength: SubtitleHighlightStrength;
@@ -1948,6 +1892,7 @@ ${stylePrompt}
       shorts: {
         subtitlePreset: 'shorts',
         subtitlePosition: 'bottom',
+        subtitleGridPosition: 9,
         subtitleMaxChars: 20,
         subtitleWordHighlight: true,
         subtitleHighlightStrength: 'high',
@@ -1956,6 +1901,7 @@ ${stylePrompt}
       docu: {
         subtitlePreset: 'docu',
         subtitlePosition: 'bottom',
+        subtitleGridPosition: 9,
         subtitleMaxChars: 28,
         subtitleWordHighlight: false,
         subtitleHighlightStrength: 'low',
@@ -1964,6 +1910,7 @@ ${stylePrompt}
       lecture: {
         subtitlePreset: 'lecture',
         subtitlePosition: 'middle',
+        subtitleGridPosition: 5,
         subtitleMaxChars: 26,
         subtitleWordHighlight: true,
         subtitleHighlightStrength: 'medium',
@@ -1988,6 +1935,7 @@ ${stylePrompt}
         ...prev.finalVideo,
         subtitlePreset: template.subtitlePreset,
         subtitlePosition: template.subtitlePosition,
+        subtitleGridPosition: Number(template.subtitleGridPosition || (template.subtitlePosition === 'middle' ? 5 : 9)),
         subtitleMaxChars: template.subtitleMaxChars,
         subtitleWordHighlight: template.subtitleWordHighlight,
         subtitleHighlightStrength: template.subtitleHighlightStrength,
@@ -2007,6 +1955,7 @@ ${stylePrompt}
         ...prev.finalVideo,
         subtitlePreset: selected.config.subtitlePreset,
         subtitlePosition: selected.config.subtitlePosition,
+        subtitleGridPosition: Number(selected.config.subtitleGridPosition || (selected.config.subtitlePosition === 'middle' ? 5 : 9)),
         subtitleMaxChars: selected.config.subtitleMaxChars,
         subtitleWordHighlight: selected.config.subtitleWordHighlight,
         subtitleHighlightStrength: selected.config.subtitleHighlightStrength,
@@ -2044,6 +1993,7 @@ ${stylePrompt}
       name,
       subtitlePreset: ui.finalVideo.subtitlePreset,
       subtitlePosition: ui.finalVideo.subtitlePosition,
+      subtitleGridPosition: ui.finalVideo.subtitleGridPosition,
       subtitleMaxChars: ui.finalVideo.subtitleMaxChars,
       subtitleWordHighlight: ui.finalVideo.subtitleWordHighlight,
       subtitleHighlightStrength: ui.finalVideo.subtitleHighlightStrength,
@@ -2098,10 +2048,11 @@ ${stylePrompt}
           name: String(t.name).slice(0, 40),
           subtitlePreset: (['shorts', 'docu', 'lecture'].includes(t.subtitlePreset) ? t.subtitlePreset : 'shorts') as SubtitlePreset,
           subtitlePosition: (['bottom', 'middle'].includes(t.subtitlePosition) ? t.subtitlePosition : 'bottom') as SubtitlePosition,
+          subtitleGridPosition: Number.isFinite(t.subtitleGridPosition) ? Math.min(10, Math.max(1, Number(t.subtitleGridPosition))) : 9,
           subtitleMaxChars: Number.isFinite(t.subtitleMaxChars) ? Math.min(40, Math.max(12, Number(t.subtitleMaxChars))) : 24,
           subtitleWordHighlight: Boolean(t.subtitleWordHighlight),
           subtitleHighlightStrength: (['low', 'medium', 'high'].includes(t.subtitleHighlightStrength) ? t.subtitleHighlightStrength : 'medium') as SubtitleHighlightStrength,
-          subtitleEntryAnimation: (['none', 'fade', 'pop'].includes(t.subtitleEntryAnimation) ? t.subtitleEntryAnimation : 'fade') as SubtitleEntryAnimation,
+          subtitleEntryAnimation: (['none', 'fade', 'pop', 'slide_up', 'slide_down', 'slide_left', 'slide_right'].includes(t.subtitleEntryAnimation) ? t.subtitleEntryAnimation : 'fade') as SubtitleEntryAnimation,
           subtitleKeywords: typeof t.subtitleKeywords === 'string' ? t.subtitleKeywords : '',
           subtitleUsePerCutKeywords: Boolean(t.subtitleUsePerCutKeywords),
         })) as SavedSubtitleTemplate[];
@@ -3426,7 +3377,7 @@ ${JSON.stringify(cutPayload)}`,
                               {BUILTIN_SUBTITLE_TEMPLATES.map(template => (
                                 <div
                                   key={template.id}
-                                  className="text-left bg-slate-800/80 border border-white/10 rounded-lg p-2 hover:bg-slate-700 transition-all space-y-2"
+                                  className="group relative text-left bg-slate-800/80 border border-white/10 rounded-lg p-2 hover:bg-slate-700 transition-all space-y-2"
                                 >
                                   <button
                                     onClick={() => applyBuiltinSubtitleTemplate(template.id)}
@@ -3443,6 +3394,16 @@ ${JSON.stringify(cutPayload)}`,
                                       />
                                       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
                                       <p className="absolute left-2 bottom-2 text-[10px] font-black text-white">{template.sample}</p>
+                                    </div>
+                                    <div className="pointer-events-none absolute left-full top-0 z-30 ml-3 hidden w-40 rounded-lg border border-white/20 bg-black/80 p-1 shadow-2xl group-hover:block">
+                                      <img
+                                        src={templatePreviewOverrides[template.id] || getBuiltinTemplatePreview(template)}
+                                        alt={`${template.name}-zoom`}
+                                        className="w-full h-auto rounded-md"
+                                        onError={(e) => {
+                                          e.currentTarget.src = `https://picsum.photos/seed/subtitle-zoom-${template.id}/540/960`;
+                                        }}
+                                      />
                                     </div>
                                     <p className="text-[11px] font-black text-white flex items-center justify-between gap-2 mt-2">
                                       <span>{template.name}</span>
@@ -3558,7 +3519,7 @@ ${JSON.stringify(cutPayload)}`,
                             className="w-full accent-emerald-300"
                           />
                           <div className="flex items-center justify-between gap-3 pt-1">
-                            <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">자막 위치</label>
+                            <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">자막 정렬</label>
                             <select
                               value={ui.finalVideo.subtitlePosition}
                               onChange={(e) => setUi(prev => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitlePosition: e.target.value as SubtitlePosition } }))}
@@ -3567,6 +3528,21 @@ ${JSON.stringify(cutPayload)}`,
                               <option value="bottom">하단</option>
                               <option value="middle">중앙</option>
                             </select>
+                          </div>
+                          <div className="space-y-1 pt-1">
+                            <div className="flex items-center justify-between gap-3">
+                              <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">자막 위치 (10등분)</label>
+                              <span className="text-[10px] text-emerald-100 font-bold">{ui.finalVideo.subtitleGridPosition}/10</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="1"
+                              max="10"
+                              step="1"
+                              value={ui.finalVideo.subtitleGridPosition}
+                              onChange={(e) => setUi(prev => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitleGridPosition: Number(e.target.value) } }))}
+                              className="w-full accent-emerald-300"
+                            />
                           </div>
                           <div className="flex items-center justify-between gap-3 pt-1">
                             <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">자막 스타일</label>
@@ -3665,6 +3641,10 @@ ${JSON.stringify(cutPayload)}`,
                               <option value="none">없음</option>
                               <option value="fade">페이드 인</option>
                               <option value="pop">팝 인</option>
+                              <option value="slide_up">위로 슬라이드</option>
+                              <option value="slide_down">아래로 슬라이드</option>
+                              <option value="slide_left">왼쪽 슬라이드</option>
+                              <option value="slide_right">오른쪽 슬라이드</option>
                             </select>
                           </div>
                         </>
@@ -3796,7 +3776,7 @@ ${JSON.stringify(cutPayload)}`,
 
                 <div className="bg-black/40 border border-white/5 rounded-[2rem] p-6 flex flex-col items-center justify-center text-center space-y-4">
                   {ui.finalVideo.url ? (
-                    <div className="w-full aspect-video bg-black rounded-2xl overflow-hidden relative border border-white/10">
+                    <div className="w-full bg-black rounded-2xl overflow-hidden relative border border-white/10" style={{ aspectRatio: ratioToCss(ui.cuts.ratio || '16:9') }}>
                       {ui.finalVideo.url.startsWith('data:image') ? (
                         <div className="w-full h-full flex items-center justify-center bg-slate-900">
                           <img src={ui.finalVideo.url} className="w-full h-full object-contain opacity-50" alt="" />
@@ -3811,7 +3791,7 @@ ${JSON.stringify(cutPayload)}`,
                     </div>
                   ) : ui.finalVideo.type === 'image_slide' && ui.finalVideo.slides.length > 0 ? (
                     <div className="w-full space-y-3">
-                      <div className="w-full aspect-video bg-black rounded-2xl overflow-hidden relative border border-white/10">
+                      <div className="w-full bg-black rounded-2xl overflow-hidden relative border border-white/10" style={{ aspectRatio: ratioToCss(ui.cuts.ratio || '16:9') }}>
                         <AnimatePresence mode="wait">
                           {(() => {
                             const active = ui.finalVideo.slides[ui.finalVideo.activeSlide];
@@ -3835,7 +3815,10 @@ ${JSON.stringify(cutPayload)}`,
                           CUT {ui.finalVideo.slides[ui.finalVideo.activeSlide]?.cut} · {SLIDE_MOTIONS.find(m => m.id === ui.finalVideo.slides[ui.finalVideo.activeSlide]?.motion)?.label}
                         </div>
                         {ui.finalVideo.subtitleEnabled && (
-                          <div className={`absolute left-1/2 -translate-x-1/2 w-[86%] px-4 py-2 rounded-xl border border-white/15 ${ui.finalVideo.subtitlePosition === 'middle' ? 'top-1/2 -translate-y-1/2' : 'bottom-6'} ${ui.finalVideo.subtitlePreset === 'shorts' ? 'bg-black/55' : ui.finalVideo.subtitlePreset === 'docu' ? 'bg-slate-950/70' : 'bg-slate-900/65'}`}>
+                          <div
+                            className={`absolute left-1/2 -translate-x-1/2 -translate-y-1/2 w-[86%] px-4 py-2 rounded-xl border border-white/15 ${ui.finalVideo.subtitlePreset === 'shorts' ? 'bg-black/55' : ui.finalVideo.subtitlePreset === 'docu' ? 'bg-slate-950/70' : 'bg-slate-900/65'}`}
+                            style={{ top: `${gridPositionToPercent(ui.finalVideo.subtitleGridPosition)}%` }}
+                          >
                             <p className={`text-xs font-black leading-snug drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)] line-clamp-2 ${ui.finalVideo.subtitlePreset === 'shorts' ? 'text-white' : ui.finalVideo.subtitlePreset === 'docu' ? 'text-slate-100' : 'text-white'}`}>
                               {ui.cuts.items[(ui.finalVideo.slides[ui.finalVideo.activeSlide]?.cut || 1) - 1] || ''}
                             </p>
@@ -3866,7 +3849,7 @@ ${JSON.stringify(cutPayload)}`,
                       ? ui.finalVideo.slides
                       : ui.imageJobs.filter(j => j.imageUrl)
                     ).map((job: any, i: number) => (
-                      <img key={i} src={job.imageUrl} className={`h-16 aspect-video object-cover rounded-lg border shrink-0 ${ui.finalVideo.type === 'image_slide' && i === ui.finalVideo.activeSlide ? 'border-emerald-400' : 'border-white/10'}`} alt="" />
+                      <img key={i} src={job.imageUrl} style={{ aspectRatio: ratioToCss(ui.cuts.ratio || '16:9') }} className={`h-16 object-cover rounded-lg border shrink-0 ${ui.finalVideo.type === 'image_slide' && i === ui.finalVideo.activeSlide ? 'border-emerald-400' : 'border-white/10'}`} alt="" />
                     ))}
                     {(ui.finalVideo.type === 'image_slide' ? ui.finalVideo.slides.length === 0 : ui.imageJobs.filter(j => j.imageUrl).length === 0) && (
                       <div className="w-full h-16 border border-dashed border-white/10 rounded-lg flex items-center justify-center text-[10px] text-slate-600">이미지가 없습니다.</div>
