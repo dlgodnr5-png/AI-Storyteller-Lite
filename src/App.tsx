@@ -46,7 +46,7 @@ const GEMINI_TTS_VOICES = [
   { id: "Orus", label: "Orus · 남성 · 에너지/명료", gender: "남성", tags: ["에너지", "명료", "자신감"] },
   { id: "Pulcherrima", label: "Pulcherrima · 여성 · 우아/유연", gender: "여성", tags: ["우아", "유연", "세련"] },
   { id: "Rasalgethi", label: "Rasalgethi · 남성 · 묵직/장중", gender: "남성", tags: ["묵직", "장중", "서사"] },
-  { id: "Sadachbia", label: "Sadachbia · 여성 · 또렷/선명", gender: "여성", tags: ["또렷", "선명", "기본"] },
+  { id: "Sadachbia", label: "Sadachbia · 남성 · 또렷/선명", gender: "남성", tags: ["또렷", "선명", "기본"] },
   { id: "Sadaltager", label: "Sadaltager · 남성 · 안정/중립", gender: "남성", tags: ["안정", "중립", "단정"] },
   { id: "Schedar", label: "Schedar · 남성 · 저음/묵직", gender: "남성", tags: ["저음", "묵직", "권위"] },
   { id: "Sulafat", label: "Sulafat · 여성 · 부드러움/따뜻", gender: "여성", tags: ["부드러움", "따뜻", "잔잔"] },
@@ -134,6 +134,15 @@ const SFX_LIBRARY: Array<{ label: string; path: string }> = [
   { label: '총소리 · 기관총 연사 1', path: '/audio/sound effects/총소리/기관총 연사 1.mp3' },
   { label: '전화기 · 전화전자식', path: '/audio/sound effects/전화기/전화전자식.mp3' },
   { label: '황당할때 · 띠웅~', path: '/audio/sound effects/황당할때/띠웅~.mp3' },
+];
+
+const SFX_RECOMMEND_RULES: Array<{ category: string; keywords: string[] }> = [
+  { category: '긴장', keywords: ['긴장', '공포', '위기', '불안', '비밀', '충격', '살인', '미스터리'] },
+  { category: '비상사이렌', keywords: ['사건', '사고', '긴급', '경보', '출동', '응급', '재난', '속보'] },
+  { category: '단체웃음', keywords: ['웃음', '유머', '코믹', '드립', '개그', '황당', '반전'] },
+  { category: '총소리', keywords: ['총', '총격', '전투', '사격', '폭발', '전쟁', '추격'] },
+  { category: '전화기', keywords: ['전화', '통화', '벨', '연락', '호출'] },
+  { category: '효과음', keywords: ['전환', '등장', '강조', '팁', '주의', '핵심'] },
 ];
 
 const TONE_STYLES = [
@@ -246,6 +255,15 @@ type SubtitlePreset = 'shorts' | 'docu' | 'lecture';
 type SubtitleEntryAnimation = 'none' | 'fade' | 'pop' | 'slide_up' | 'slide_down' | 'slide_left' | 'slide_right';
 type SubtitleHighlightStrength = 'low' | 'medium' | 'high';
 type SubtitleSegment = { start: number; end: number; text: string; lines: string[]; cut: number };
+type PublishPlatform = 'youtube' | 'tiktok' | 'instagram' | 'threads' | 'x';
+type PublishJobStatus = 'scheduled' | 'publishing' | 'published' | 'failed' | 'partial';
+type PublishVisibility = 'public' | 'unlisted' | 'private';
+type YouTubeAuthSession = {
+  accessToken: string;
+  expiresAt: number;
+  channelTitle: string;
+  channelHandle: string;
+};
 type SavedSubtitleTemplate = {
   name: string;
   subtitlePreset: SubtitlePreset;
@@ -283,6 +301,32 @@ const hashString = (text: string) => {
     hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
   }
   return hash;
+};
+
+const createOAuthState = () => {
+  const bytes = new Uint8Array(16);
+  window.crypto.getRandomValues(bytes);
+  return Array.from(bytes).map(v => v.toString(16).padStart(2, '0')).join('');
+};
+
+const sfxLibraryByCategory = SFX_LIBRARY.reduce<Record<string, string[]>>((acc, item) => {
+  const matched = item.path.match(/\/sound effects\/([^/]+)\//i);
+  const category = matched?.[1] || '효과음';
+  if (!acc[category]) acc[category] = [];
+  acc[category].push(item.path);
+  return acc;
+}, {});
+
+const recommendSfxCategory = (text: string) => {
+  const lowered = (text || '').toLowerCase();
+  const matchedRule = SFX_RECOMMEND_RULES.find(rule => rule.keywords.some(keyword => lowered.includes(keyword.toLowerCase())));
+  return matchedRule?.category || '효과음';
+};
+
+const pickDeterministicItem = <T,>(items: T[], seed: string): T | null => {
+  if (!items.length) return null;
+  const idx = hashString(seed) % items.length;
+  return items[idx];
 };
 
 const pickSlideMotion = (text: string, index: number): SlideMotionType => {
@@ -367,6 +411,18 @@ const SUBTITLE_PRESETS: Record<SubtitlePreset, {
 
 const SUBTITLE_TEMPLATE_LS_KEY = 'ai_storyteller_subtitle_templates_v1';
 const SUBTITLE_TEMPLATE_PREVIEW_LS_KEY = 'ai_storyteller_subtitle_template_previews_v1';
+const PUBLISH_AUTOSAVE_LS_KEY = 'ai_storyteller_publish_draft_v1';
+const YT_OAUTH_STATE_LS_KEY = 'ai_storyteller_yt_oauth_state_v1';
+const YT_AUTH_SESSION_LS_KEY = 'ai_storyteller_yt_auth_session_v1';
+const PUBLISH_RETRY_SCHEDULE_MS = [0, 10 * 60 * 1000, 60 * 60 * 1000];
+
+const SOCIAL_PLATFORM_META: Array<{ id: PublishPlatform; label: string; color: string; available: boolean }> = [
+  { id: 'youtube', label: 'YouTube', color: 'from-red-500 to-rose-500', available: true },
+  { id: 'tiktok', label: 'TikTok', color: 'from-slate-800 to-black', available: false },
+  { id: 'instagram', label: 'Instagram', color: 'from-fuchsia-500 to-orange-400', available: false },
+  { id: 'threads', label: 'Threads', color: 'from-slate-700 to-slate-900', available: false },
+  { id: 'x', label: 'X', color: 'from-sky-700 to-slate-900', available: false },
+];
 
 const getRenderDimensions = (ratio: string, resolution: RenderResolution) => {
   const base = RATIO_DIMENSIONS[ratio] || RATIO_DIMENSIONS['9:16'];
@@ -871,7 +927,7 @@ export default function App() {
   const [ui, setUi] = useState({
     settingsOpen: false,
     happyDayOpen: false,
-    panelsOpen: { p1: true, p2: true, p3: true, p4: true, p_style: true, p5: true, p6: true, p7: true, p8: true, p9: true, p10: true, p11: true, p12: true, p13: true },
+    panelsOpen: { p1: true, p2: true, p3: true, p4: true, p_style: true, p5: true, p6: true, p7: true, p8: true, p9: true, p10: true, p11: true, p12: true, p13: true, p14: true },
     searching: false,
     searchError: '',
     videoStyle: {
@@ -964,6 +1020,43 @@ export default function App() {
       sfxTrack: SFX_LIBRARY[0]?.path || '',
       sfxVolume: 45,
       sfxEveryCut: true,
+      sfxMode: 'single' as 'single' | 'auto',
+      bgmDuckingEnabled: true,
+      bgmDuckingDb: 10,
+    },
+    publishing: {
+      selectedPlatform: 'youtube' as PublishPlatform,
+      mobileStep: 1,
+      notifyEmail: '',
+      accounts: [
+        { id: 'yt-main', platform: 'youtube' as PublishPlatform, name: 'YouTube 기본 채널', handle: '@your-channel', connected: false, lastSyncedAt: '' },
+      ],
+      draft: {
+        title: '',
+        description: '',
+        visibility: 'public' as PublishVisibility,
+        scheduleAt: '',
+        autoRetry: true,
+        maxAttempts: 3,
+      },
+      jobs: [] as Array<{
+        id: string;
+        platform: PublishPlatform;
+        accountId: string;
+        title: string;
+        description: string;
+        visibility: PublishVisibility;
+        scheduleAt: string;
+        autoRetry: boolean;
+        maxAttempts: number;
+        attemptCount: number;
+        status: PublishJobStatus;
+        lastError: string;
+        videoUrl: string;
+        notifiedAt: string;
+        publishedUrl: string;
+        createdAt: string;
+      }>,
     }
   });
 
@@ -982,17 +1075,30 @@ export default function App() {
   });
   const [autoImageBatchRunning, setAutoImageBatchRunning] = useState(false);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const publishRetryTimersRef = useRef<Record<string, number[]>>({});
+  const [youtubeAuth, setYoutubeAuth] = useState<YouTubeAuthSession | null>(null);
 
   const [results, setResults] = useState<any[]>([]);
   const [subtitleTemplates, setSubtitleTemplates] = useState<SavedSubtitleTemplate[]>([]);
   const [templatePreviewOverrides, setTemplatePreviewOverrides] = useState<Record<string, string>>({});
   const initialUiRef = useRef<any>(null);
+  const env = (import.meta as any).env || {};
+  const googleClientId = env.VITE_GOOGLE_CLIENT_ID || '';
+  const googleRedirectUri = env.VITE_GOOGLE_REDIRECT_URI || `${window.location.origin}/oauth/google/callback`;
 
   useEffect(() => {
     if (!initialUiRef.current) {
       initialUiRef.current = JSON.parse(JSON.stringify(ui));
     }
   }, [ui]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(publishRetryTimersRef.current).forEach(timerIds => {
+        timerIds.forEach(timerId => window.clearTimeout(timerId));
+      });
+    };
+  }, []);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -1046,6 +1152,152 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(SUBTITLE_TEMPLATE_PREVIEW_LS_KEY, JSON.stringify(templatePreviewOverrides));
   }, [templatePreviewOverrides]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PUBLISH_AUTOSAVE_LS_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+
+      setUi(prev => ({
+        ...prev,
+        publishing: {
+          ...prev.publishing,
+          notifyEmail: typeof parsed.notifyEmail === 'string' ? parsed.notifyEmail : prev.publishing.notifyEmail,
+          mobileStep: Number.isFinite(parsed.mobileStep) ? Math.min(5, Math.max(1, Number(parsed.mobileStep))) : prev.publishing.mobileStep,
+          draft: {
+            ...prev.publishing.draft,
+            ...(parsed.draft || {}),
+          },
+          jobs: Array.isArray(parsed.jobs) ? parsed.jobs : prev.publishing.jobs,
+          accounts: Array.isArray(parsed.accounts) ? parsed.accounts : prev.publishing.accounts,
+        },
+      }));
+    } catch {
+      // ignore corrupted autosave
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(
+      PUBLISH_AUTOSAVE_LS_KEY,
+      JSON.stringify({
+        notifyEmail: ui.publishing.notifyEmail,
+        mobileStep: ui.publishing.mobileStep,
+        draft: ui.publishing.draft,
+        jobs: ui.publishing.jobs,
+        accounts: ui.publishing.accounts,
+      }),
+    );
+  }, [ui.publishing]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(YT_AUTH_SESSION_LS_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as YouTubeAuthSession;
+      if (!parsed?.accessToken || !parsed?.expiresAt || parsed.expiresAt <= Date.now()) {
+        localStorage.removeItem(YT_AUTH_SESSION_LS_KEY);
+        return;
+      }
+
+      setYoutubeAuth(parsed);
+      setUi(prev => ({
+        ...prev,
+        publishing: {
+          ...prev.publishing,
+          accounts: prev.publishing.accounts.map(account =>
+            account.platform === 'youtube'
+              ? {
+                  ...account,
+                  connected: true,
+                  name: parsed.channelTitle || account.name,
+                  handle: parsed.channelHandle || account.handle,
+                  lastSyncedAt: new Date().toISOString(),
+                }
+              : account,
+          ),
+        },
+      }));
+    } catch {
+      localStorage.removeItem(YT_AUTH_SESSION_LS_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    const finishOAuth = async () => {
+      if (window.location.pathname !== '/oauth/google/callback') return;
+      const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
+      const params = new URLSearchParams(hash);
+      const accessToken = params.get('access_token') || '';
+      const state = params.get('state') || '';
+      const expiresIn = Number(params.get('expires_in') || '3600');
+      const error = params.get('error') || '';
+
+      if (error) {
+        alert(`Google OAuth 실패: ${error}`);
+        window.history.replaceState({}, '', '/');
+        return;
+      }
+
+      const storedState = localStorage.getItem(YT_OAUTH_STATE_LS_KEY) || '';
+      localStorage.removeItem(YT_OAUTH_STATE_LS_KEY);
+      if (!accessToken || !state || state !== storedState) {
+        alert('OAuth 상태 검증에 실패했습니다. 다시 시도해 주세요.');
+        window.history.replaceState({}, '', '/');
+        return;
+      }
+
+      try {
+        const res = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (!res.ok) {
+          throw new Error(`채널 조회 실패 (${res.status})`);
+        }
+        const data = await res.json();
+        const channel = data?.items?.[0]?.snippet || {};
+        const channelTitle = channel?.title || 'YouTube 채널';
+        const channelHandle = channel?.customUrl ? `@${channel.customUrl.replace(/^@/, '')}` : '@connected-channel';
+        const session: YouTubeAuthSession = {
+          accessToken,
+          expiresAt: Date.now() + Math.max(60, expiresIn - 30) * 1000,
+          channelTitle,
+          channelHandle,
+        };
+
+        localStorage.setItem(YT_AUTH_SESSION_LS_KEY, JSON.stringify(session));
+        setYoutubeAuth(session);
+        setUi(prev => ({
+          ...prev,
+          publishing: {
+            ...prev.publishing,
+            mobileStep: 1,
+            accounts: prev.publishing.accounts.map(account =>
+              account.platform === 'youtube'
+                ? {
+                    ...account,
+                    connected: true,
+                    name: channelTitle,
+                    handle: channelHandle,
+                    lastSyncedAt: new Date().toISOString(),
+                  }
+                : account,
+            ),
+          },
+        }));
+        alert('YouTube 계정 연결이 완료되었습니다.');
+      } catch (err: any) {
+        console.error(err);
+        alert(`YouTube 채널 정보 확인에 실패했습니다: ${err?.message || '알 수 없는 오류'}`);
+      } finally {
+        window.history.replaceState({}, '', '/');
+      }
+    };
+
+    finishOAuth();
+  }, []);
 
   useEffect(() => {
     setUi(prev => ({ 
@@ -1849,6 +2101,221 @@ ${stylePrompt}
     e.currentTarget.value = '';
   };
 
+  const publishAssetUrl = ui.finalVideo.url;
+  const publishSteps = [
+    { id: 1, title: '계정', description: 'YouTube 계정을 연결하세요.' },
+    { id: 2, title: '영상', description: '최종 영상 파일을 확인합니다.' },
+    { id: 3, title: '메타', description: '제목/설명을 입력합니다.' },
+    { id: 4, title: '예약', description: '공개 설정과 예약 시간을 지정합니다.' },
+    { id: 5, title: '확인', description: '예약 발행을 실행하고 상태를 추적합니다.' },
+  ];
+
+  const clearPublishTimers = (jobId: string) => {
+    const timers = publishRetryTimersRef.current[jobId] || [];
+    timers.forEach(timerId => window.clearTimeout(timerId));
+    delete publishRetryTimersRef.current[jobId];
+  };
+
+  const connectYouTubeAccount = () => {
+    if (!googleClientId) {
+      alert('VITE_GOOGLE_CLIENT_ID가 설정되지 않았습니다. .env를 확인해 주세요.');
+      return;
+    }
+    if (!googleRedirectUri) {
+      alert('VITE_GOOGLE_REDIRECT_URI가 설정되지 않았습니다. .env를 확인해 주세요.');
+      return;
+    }
+
+    const state = createOAuthState();
+    localStorage.setItem(YT_OAUTH_STATE_LS_KEY, state);
+
+    const scope = [
+      'https://www.googleapis.com/auth/youtube.upload',
+      'https://www.googleapis.com/auth/youtube.readonly',
+      'openid',
+      'email',
+      'profile',
+    ].join(' ');
+
+    const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    authUrl.searchParams.set('client_id', googleClientId);
+    authUrl.searchParams.set('redirect_uri', googleRedirectUri);
+    authUrl.searchParams.set('response_type', 'token');
+    authUrl.searchParams.set('scope', scope);
+    authUrl.searchParams.set('include_granted_scopes', 'true');
+    authUrl.searchParams.set('state', state);
+    authUrl.searchParams.set('prompt', 'consent');
+
+    window.location.href = authUrl.toString();
+  };
+
+  const disconnectYouTubeAccount = () => {
+    localStorage.removeItem(YT_AUTH_SESSION_LS_KEY);
+    setYoutubeAuth(null);
+    setUi(prev => ({
+      ...prev,
+      publishing: {
+        ...prev.publishing,
+        accounts: prev.publishing.accounts.map(account =>
+          account.platform === 'youtube'
+            ? {
+                ...account,
+                connected: false,
+                name: 'YouTube 기본 채널',
+                handle: '@your-channel',
+                lastSyncedAt: '',
+              }
+            : account,
+        ),
+      },
+    }));
+    alert('YouTube 계정 연결이 해제되었습니다.');
+  };
+
+  const sendPublishEmailNotification = (job: any) => {
+    if (!ui.publishing.notifyEmail) return;
+    const subject = encodeURIComponent(`[AI Storyteller] 발행 ${job.status === 'published' ? '완료' : '실패'} 알림`);
+    const body = encodeURIComponent(
+      [
+        `플랫폼: ${job.platform.toUpperCase()}`,
+        `상태: ${job.status}`,
+        `제목: ${job.title}`,
+        `예약시간: ${job.scheduleAt || '즉시'}`,
+        `시도 횟수: ${job.attemptCount}/${job.maxAttempts}`,
+        job.publishedUrl ? `게시 URL: ${job.publishedUrl}` : '',
+        job.lastError ? `오류: ${job.lastError}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
+
+    window.open(`mailto:${ui.publishing.notifyEmail}?subject=${subject}&body=${body}`, '_blank');
+  };
+
+  const runPublishAttempt = (jobId: string, attemptIndex: number) => {
+    setUi(prev => {
+      const target = prev.publishing.jobs.find(job => job.id === jobId);
+      if (!target || target.status === 'published') return prev;
+
+      const now = new Date().toISOString();
+      const nextAttemptCount = attemptIndex + 1;
+      const hasVideo = Boolean(target.videoUrl);
+      const hasMeta = Boolean(target.title.trim() && target.description.trim());
+      const canPublish = target.platform === 'youtube' && hasVideo && hasMeta;
+      const nextStatus: PublishJobStatus = canPublish ? 'published' : 'failed';
+
+      const nextJobs = prev.publishing.jobs.map(job => {
+        if (job.id !== jobId) return job;
+        return {
+          ...job,
+          status: nextStatus,
+          attemptCount: nextAttemptCount,
+          lastError: canPublish ? '' : '메타데이터 또는 영상 파일 누락으로 발행 실패',
+          publishedUrl: canPublish ? `https://youtube.com/watch?v=${job.id.slice(4, 15)}` : '',
+          notifiedAt: canPublish || nextAttemptCount >= job.maxAttempts ? now : '',
+        };
+      });
+
+      const updatedJob = nextJobs.find(job => job.id === jobId);
+      if (!updatedJob) return prev;
+
+      if (!canPublish && updatedJob.autoRetry && nextAttemptCount < updatedJob.maxAttempts) {
+        const delay = PUBLISH_RETRY_SCHEDULE_MS[nextAttemptCount] ?? PUBLISH_RETRY_SCHEDULE_MS[PUBLISH_RETRY_SCHEDULE_MS.length - 1];
+        const timerId = window.setTimeout(() => runPublishAttempt(jobId, nextAttemptCount), delay);
+        publishRetryTimersRef.current[jobId] = [...(publishRetryTimersRef.current[jobId] || []), timerId];
+      } else {
+        clearPublishTimers(jobId);
+      }
+
+      if (updatedJob.notifiedAt) {
+        setTimeout(() => sendPublishEmailNotification(updatedJob), 0);
+      }
+
+      return {
+        ...prev,
+        publishing: {
+          ...prev.publishing,
+          jobs: nextJobs,
+        },
+      };
+    });
+  };
+
+  const queueYouTubePublish = () => {
+    if (!youtubeAuth?.accessToken || youtubeAuth.expiresAt <= Date.now()) {
+      alert('YouTube 인증이 만료되었거나 없습니다. 계정을 다시 연결해 주세요.');
+      return;
+    }
+
+    const youtubeAccount = ui.publishing.accounts.find(account => account.platform === 'youtube' && account.connected);
+    if (!youtubeAccount) {
+      alert('먼저 YouTube 계정을 연결하세요.');
+      return;
+    }
+
+    if (!publishAssetUrl) {
+      alert('발행할 최종 영상 파일이 없습니다. 12번 패널에서 영상 렌더링을 완료하세요.');
+      return;
+    }
+
+    const title = ui.publishing.draft.title.trim();
+    if (!title) {
+      alert('제목을 입력해 주세요.');
+      return;
+    }
+
+    const now = new Date();
+    const scheduleAt = ui.publishing.draft.scheduleAt || now.toISOString();
+    const scheduleDate = new Date(scheduleAt);
+    if (Number.isNaN(scheduleDate.getTime())) {
+      alert('예약 시간이 올바르지 않습니다.');
+      return;
+    }
+
+    const id = `job_${Date.now()}`;
+    const newJob = {
+      id,
+      platform: 'youtube' as PublishPlatform,
+      accountId: youtubeAccount.id,
+      title,
+      description: ui.publishing.draft.description.trim(),
+      visibility: ui.publishing.draft.visibility,
+      scheduleAt: scheduleDate.toISOString(),
+      autoRetry: ui.publishing.draft.autoRetry,
+      maxAttempts: Math.max(1, Math.min(3, ui.publishing.draft.maxAttempts)),
+      attemptCount: 0,
+      status: 'scheduled' as PublishJobStatus,
+      lastError: '',
+      videoUrl: publishAssetUrl,
+      notifiedAt: '',
+      publishedUrl: '',
+      createdAt: now.toISOString(),
+    };
+
+    setUi(prev => ({
+      ...prev,
+      publishing: {
+        ...prev.publishing,
+        jobs: [newJob, ...prev.publishing.jobs],
+      },
+    }));
+
+    const delay = Math.max(0, scheduleDate.getTime() - now.getTime());
+    const timerId = window.setTimeout(() => runPublishAttempt(id, 0), delay);
+    publishRetryTimersRef.current[id] = [timerId];
+    alert('YouTube 예약 발행 작업이 등록되었습니다.');
+  };
+
+  const setPublishingStep = (step: number) => {
+    setUi(prev => ({
+      ...prev,
+      publishing: {
+        ...prev.publishing,
+        mobileStep: Math.min(5, Math.max(1, step)),
+      },
+    }));
+  };
+
   // --- Render Helpers ---
   const PanelHeader = ({ title, id, colorClass, badge }: { title: string, id: keyof typeof ui.panelsOpen, colorClass: string, badge?: string }) => (
     <div className="flex items-center justify-between mb-4">
@@ -2038,7 +2505,10 @@ ${stylePrompt}
       let audioDuration = 0;
       let ttsSourceNode: AudioBufferSourceNode | null = null;
       let bgmSourceNode: AudioBufferSourceNode | null = null;
+      let mixInputGain: GainNode | null = null;
       let destinationNode: MediaStreamAudioDestinationNode | null = null;
+      const sfxSchedule: Array<{ when: number; path: string }> = [];
+      const sfxDecodedBuffers = new Map<string, AudioBuffer>();
       const sfxSourceNodes: AudioBufferSourceNode[] = [];
 
       const shouldMixTts = Boolean(ui.tts.audioUrl);
@@ -2049,6 +2519,15 @@ ${stylePrompt}
       if (shouldMixAnyAudio) {
         audioContext = new window.AudioContext();
         destinationNode = audioContext.createMediaStreamDestination();
+        mixInputGain = audioContext.createGain();
+        const limiter = audioContext.createDynamicsCompressor();
+        limiter.threshold.value = -6;
+        limiter.knee.value = 8;
+        limiter.ratio.value = 12;
+        limiter.attack.value = 0.003;
+        limiter.release.value = 0.25;
+        mixInputGain.connect(limiter);
+        limiter.connect(destinationNode);
         const audioTrack = destinationNode.stream.getAudioTracks()[0];
         if (audioTrack) {
           stream.addTrack(audioTrack);
@@ -2074,7 +2553,7 @@ ${stylePrompt}
           const ttsGain = audioContext.createGain();
           ttsGain.gain.value = 1;
           ttsSourceNode.connect(ttsGain);
-          ttsGain.connect(destinationNode);
+          ttsGain.connect(mixInputGain || destinationNode);
         }
 
         if (shouldMixBgm) {
@@ -2089,45 +2568,51 @@ ${stylePrompt}
           bgmSourceNode.buffer = decodedBgm;
           bgmSourceNode.loop = true;
           const bgmGain = audioContext.createGain();
-          bgmGain.gain.value = Math.min(1, Math.max(0, Number(ui.finalVideo.bgmVolume || 0) / 100));
+          const bgmBaseGain = Math.min(1, Math.max(0, Number(ui.finalVideo.bgmVolume || 0) / 100));
+          const duckingDb = Math.max(0, Number(ui.finalVideo.bgmDuckingDb || 0));
+          const duckingFactor = Math.pow(10, -duckingDb / 20);
+          const bgmDuckedGain = bgmBaseGain * duckingFactor;
+          bgmGain.gain.value = bgmBaseGain;
+          if (shouldMixTts && ui.finalVideo.bgmDuckingEnabled) {
+            bgmGain.gain.setValueAtTime(bgmDuckedGain, 0);
+            bgmGain.gain.setValueAtTime(bgmBaseGain, Math.max(0, audioDuration + 0.04));
+          }
           bgmSourceNode.connect(bgmGain);
-          bgmGain.connect(destinationNode);
+          bgmGain.connect(mixInputGain || destinationNode);
         }
 
         if (shouldMixSfx) {
-          const sfxBufferData = await fetch(encodeURI(ui.finalVideo.sfxTrack)).then(res => {
-            if (!res.ok) {
-              throw new Error('효과음 로드 실패');
-            }
-            return res.arrayBuffer();
-          });
-          const decodedSfx = await audioContext.decodeAudioData(sfxBufferData.slice(0));
-          const sfxGain = audioContext.createGain();
-          sfxGain.gain.value = Math.min(1, Math.max(0, Number(ui.finalVideo.sfxVolume || 0) / 100));
-          sfxGain.connect(destinationNode);
+          const triggerIndexes = ui.finalVideo.sfxEveryCut ? Array.from({ length: Math.max(0, slides.length - 1) }, (_, i) => i + 1) : [1];
+          for (const idx of triggerIndexes) {
+            const when = ui.finalVideo.sfxEveryCut ? introDuration + idx * slideDuration : introDuration;
+            if (when >= baseVideoDuration) continue;
 
-          const triggerTimes: number[] = [];
-          if (ui.finalVideo.sfxEveryCut) {
-            for (let i = 1; i < slides.length; i++) {
-              triggerTimes.push(introDuration + i * slideDuration);
+            let selectedPath = ui.finalVideo.sfxTrack;
+            if (ui.finalVideo.sfxMode === 'auto') {
+              const nextSlideCut = slides[idx]?.cut;
+              const prevSlideCut = slides[Math.max(0, idx - 1)]?.cut;
+              const relatedText = (ui.cuts.items[(nextSlideCut || prevSlideCut || 1) - 1] || '').trim();
+              const category = recommendSfxCategory(relatedText);
+              const categoryTracks = sfxLibraryByCategory[category] || [];
+              selectedPath = pickDeterministicItem(categoryTracks, `${relatedText}:${idx}`) || ui.finalVideo.sfxTrack;
             }
-          } else {
-            triggerTimes.push(introDuration);
+
+            if (selectedPath) {
+              sfxSchedule.push({ when, path: selectedPath });
+            }
           }
 
-          for (const startTime of triggerTimes) {
-            if (startTime >= baseVideoDuration) continue;
-            const sfxSource = audioContext.createBufferSource();
-            sfxSource.buffer = decodedSfx;
-            sfxSource.connect(sfxGain);
-            sfxSourceNodes.push(sfxSource);
+          const uniqueSfxPaths = Array.from(new Set(sfxSchedule.map(item => item.path)));
+          for (const path of uniqueSfxPaths) {
+            const sfxBufferData = await fetch(encodeURI(path)).then(res => {
+              if (!res.ok) {
+                throw new Error(`효과음 로드 실패: ${path}`);
+              }
+              return res.arrayBuffer();
+            });
+            const decodedSfx = await audioContext.decodeAudioData(sfxBufferData.slice(0));
+            sfxDecodedBuffers.set(path, decodedSfx);
           }
-
-          // Start times are scheduled after recorder starts.
-          sfxSourceNodes.forEach((node, idx) => {
-            const when = (ui.finalVideo.sfxEveryCut ? introDuration + (idx + 1) * slideDuration : introDuration);
-            node.start(Math.max(0, when));
-          });
         }
       }
 
@@ -2173,6 +2658,22 @@ ${stylePrompt}
         }
         ttsSourceNode?.start(0);
         bgmSourceNode?.start(0);
+
+        if (sfxSchedule.length > 0) {
+          const sfxGain = audioContext.createGain();
+          sfxGain.gain.value = Math.min(1, Math.max(0, Number(ui.finalVideo.sfxVolume || 0) / 100));
+          sfxGain.connect(mixInputGain || destinationNode!);
+
+          for (const item of sfxSchedule) {
+            const decoded = sfxDecodedBuffers.get(item.path);
+            if (!decoded) continue;
+            const sfxSource = audioContext.createBufferSource();
+            sfxSource.buffer = decoded;
+            sfxSource.connect(sfxGain);
+            sfxSource.start(Math.max(0, item.when));
+            sfxSourceNodes.push(sfxSource);
+          }
+        }
       }
 
       const start = performance.now();
@@ -3803,6 +4304,220 @@ ${JSON.stringify(cutPayload)}`,
                 </div>
                 <div className="bg-black/40 border border-white/5 rounded-2xl p-6 flex items-center justify-center italic text-slate-600 text-xs">
                   고급 타임라인 편집 기능 준비 중...
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-4 md:p-8 backdrop-blur-xl">
+          <PanelHeader title="14. 자동 발행 (YouTube 우선)" id="p14" colorClass="text-red-400" />
+          {ui.panelsOpen.p14 && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                {publishSteps.map(step => {
+                  const active = ui.publishing.mobileStep === step.id;
+                  const completed = ui.publishing.mobileStep > step.id;
+                  return (
+                    <button
+                      key={step.id}
+                      onClick={() => setPublishingStep(step.id)}
+                      className={`text-left rounded-xl px-3 py-2 border transition-all ${active ? 'bg-red-500/20 border-red-400 text-red-100' : completed ? 'bg-emerald-500/20 border-emerald-300/40 text-emerald-100' : 'bg-black/25 border-white/10 text-slate-300'}`}
+                    >
+                      <p className="text-[10px] font-black uppercase tracking-widest">STEP {step.id}</p>
+                      <p className="text-xs font-bold mt-1">{step.title}</p>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-4">
+                <div className="space-y-4">
+                  {ui.publishing.mobileStep === 1 && (
+                    <div className="rounded-2xl border border-white/10 bg-black/25 p-4 space-y-4">
+                      <p className="text-xs font-black text-slate-300 uppercase tracking-widest">1) 계정 연결</p>
+                      <p className="text-xs text-slate-400">Google 로그인 후 YouTube를 먼저 연결하고, 다른 SNS는 UI만 준비해 둡니다.</p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {SOCIAL_PLATFORM_META.map(platform => (
+                          <div key={platform.id} className={`rounded-xl border p-3 ${platform.available ? 'border-red-400/40 bg-red-500/10' : 'border-white/10 bg-white/5'}`}>
+                            <p className="text-xs font-black text-white">{platform.label}</p>
+                            <p className="text-[10px] mt-1 text-slate-300">{platform.available ? '연결 가능' : '업그레이드 예정'}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-slate-900/60 p-3 flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-black text-white">{ui.publishing.accounts[0]?.name || 'YouTube 기본 채널'}</p>
+                          <p className="text-[10px] text-slate-400">{ui.publishing.accounts[0]?.handle || '@your-channel'}</p>
+                          {ui.publishing.accounts[0]?.lastSyncedAt && (
+                            <p className="text-[10px] text-emerald-200/80 mt-1">동기화: {new Date(ui.publishing.accounts[0].lastSyncedAt).toLocaleString()}</p>
+                          )}
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <button
+                            onClick={connectYouTubeAccount}
+                            className={`px-3 py-2 rounded-lg text-xs font-black transition-all ${ui.publishing.accounts[0]?.connected ? 'bg-emerald-400 text-black' : 'bg-red-500 text-white hover:bg-red-400'}`}
+                          >
+                            {ui.publishing.accounts[0]?.connected ? '재연결' : '연결하기'}
+                          </button>
+                          {ui.publishing.accounts[0]?.connected && (
+                            <button
+                              onClick={disconnectYouTubeAccount}
+                              className="px-3 py-2 rounded-lg text-xs font-black transition-all bg-white/10 text-slate-100 hover:bg-white/20"
+                            >
+                              연결 해제
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {ui.publishing.mobileStep === 2 && (
+                    <div className="rounded-2xl border border-white/10 bg-black/25 p-4 space-y-3">
+                      <p className="text-xs font-black text-slate-300 uppercase tracking-widest">2) 영상 확인</p>
+                      <p className="text-xs text-slate-400">12번 패널에서 만든 최종 파일을 자동발행 소스로 사용합니다.</p>
+                      <div className="rounded-xl border border-white/10 bg-slate-950/70 p-4 space-y-2">
+                        <p className="text-xs text-slate-300">출력 포맷: <span className="font-black text-white">{ui.finalVideo.outputFormat.toUpperCase()}</span></p>
+                        <p className="text-xs text-slate-300">파일 준비: <span className={`font-black ${publishAssetUrl ? 'text-emerald-300' : 'text-rose-300'}`}>{publishAssetUrl ? '완료' : '미완료'}</span></p>
+                        {!publishAssetUrl && <p className="text-[10px] text-rose-300">영상이 없으면 예약 발행이 시작되지 않습니다.</p>}
+                      </div>
+                    </div>
+                  )}
+
+                  {ui.publishing.mobileStep === 3 && (
+                    <div className="rounded-2xl border border-white/10 bg-black/25 p-4 space-y-3">
+                      <p className="text-xs font-black text-slate-300 uppercase tracking-widest">3) 제목/설명</p>
+                      <input
+                        value={ui.publishing.draft.title}
+                        onChange={(e) => setUi(prev => ({ ...prev, publishing: { ...prev.publishing, draft: { ...prev.publishing.draft, title: e.target.value } } }))}
+                        placeholder="Short 제목을 입력하세요"
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-3 text-sm outline-none"
+                        maxLength={100}
+                      />
+                      <textarea
+                        value={ui.publishing.draft.description}
+                        onChange={(e) => setUi(prev => ({ ...prev, publishing: { ...prev.publishing, draft: { ...prev.publishing.draft, description: e.target.value } } }))}
+                        placeholder="설명을 입력하세요"
+                        rows={5}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-3 text-sm outline-none"
+                        maxLength={5000}
+                      />
+                    </div>
+                  )}
+
+                  {ui.publishing.mobileStep === 4 && (
+                    <div className="rounded-2xl border border-white/10 bg-black/25 p-4 space-y-4">
+                      <p className="text-xs font-black text-slate-300 uppercase tracking-widest">4) 예약/재시도</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(['public', 'unlisted', 'private'] as PublishVisibility[]).map(visibility => (
+                          <button
+                            key={visibility}
+                            onClick={() => setUi(prev => ({ ...prev, publishing: { ...prev.publishing, draft: { ...prev.publishing.draft, visibility } } }))}
+                            className={`rounded-xl py-2 text-xs font-black border transition-all ${ui.publishing.draft.visibility === visibility ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/10'}`}
+                          >
+                            {visibility === 'public' ? '공개' : visibility === 'unlisted' ? '일부 공개' : '비공개'}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        type="datetime-local"
+                        value={ui.publishing.draft.scheduleAt}
+                        onChange={(e) => setUi(prev => ({ ...prev, publishing: { ...prev.publishing, draft: { ...prev.publishing.draft, scheduleAt: e.target.value } } }))}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-3 text-sm outline-none"
+                      />
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="text-xs text-slate-300 font-bold">자동 재시도</label>
+                        <button
+                          onClick={() => setUi(prev => ({ ...prev, publishing: { ...prev.publishing, draft: { ...prev.publishing.draft, autoRetry: !prev.publishing.draft.autoRetry } } }))}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-black border ${ui.publishing.draft.autoRetry ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
+                        >
+                          {ui.publishing.draft.autoRetry ? 'ON' : 'OFF'}
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="text-xs text-slate-300 font-bold">최대 시도 횟수</label>
+                        <select
+                          value={ui.publishing.draft.maxAttempts}
+                          onChange={(e) => setUi(prev => ({ ...prev, publishing: { ...prev.publishing, draft: { ...prev.publishing.draft, maxAttempts: Number(e.target.value) } } }))}
+                          className="bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs outline-none"
+                        >
+                          <option value={1}>1회</option>
+                          <option value={2}>2회</option>
+                          <option value={3}>3회</option>
+                        </select>
+                      </div>
+                      <p className="text-[10px] text-slate-400">재시도 간격: 즉시 → 10분 → 60분</p>
+                    </div>
+                  )}
+
+                  {ui.publishing.mobileStep === 5 && (
+                    <div className="rounded-2xl border border-white/10 bg-black/25 p-4 space-y-4">
+                      <p className="text-xs font-black text-slate-300 uppercase tracking-widest">5) 확인/알림</p>
+                      <input
+                        type="email"
+                        value={ui.publishing.notifyEmail}
+                        onChange={(e) => setUi(prev => ({ ...prev, publishing: { ...prev.publishing, notifyEmail: e.target.value } }))}
+                        placeholder="실패/성공 알림 메일 주소"
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-3 text-sm outline-none"
+                      />
+                      <button
+                        onClick={queueYouTubePublish}
+                        className="w-full bg-gradient-to-r from-red-500 to-orange-500 text-white font-black py-3 rounded-xl hover:brightness-110 transition-all"
+                      >
+                        YouTube 예약 발행 등록
+                      </button>
+                      <p className="text-[10px] text-slate-400">메일 알림은 브라우저 mailto 훅으로 연결됩니다. 서버 메일러 연동 시 자동 전송으로 교체 가능합니다.</p>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      onClick={() => setPublishingStep(ui.publishing.mobileStep - 1)}
+                      disabled={ui.publishing.mobileStep === 1}
+                      className="flex-1 bg-white/10 border border-white/10 rounded-xl py-2.5 text-xs font-black disabled:opacity-40"
+                    >
+                      이전
+                    </button>
+                    <button
+                      onClick={() => setPublishingStep(ui.publishing.mobileStep + 1)}
+                      disabled={ui.publishing.mobileStep === 5}
+                      className="flex-1 bg-red-500/90 text-white rounded-xl py-2.5 text-xs font-black disabled:opacity-40"
+                    >
+                      다음
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+                    <p className="text-xs font-black text-slate-300 uppercase tracking-widest mb-3">발행 작업 상태</p>
+                    <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                      {ui.publishing.jobs.length === 0 ? (
+                        <p className="text-xs text-slate-500">등록된 예약 발행 작업이 없습니다.</p>
+                      ) : (
+                        ui.publishing.jobs.map(job => (
+                          <div key={job.id} className="rounded-xl border border-white/10 bg-slate-900/70 p-3 space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-black text-white line-clamp-1">{job.title}</p>
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full border ${job.status === 'published' ? 'bg-emerald-500/20 border-emerald-300/30 text-emerald-100' : job.status === 'failed' ? 'bg-rose-500/20 border-rose-300/30 text-rose-100' : 'bg-amber-500/20 border-amber-300/30 text-amber-100'}`}>{job.status}</span>
+                            </div>
+                            <p className="text-[10px] text-slate-400">예약: {new Date(job.scheduleAt).toLocaleString()}</p>
+                            <p className="text-[10px] text-slate-400">시도: {job.attemptCount}/{job.maxAttempts}</p>
+                            {job.lastError && <p className="text-[10px] text-rose-300">오류: {job.lastError}</p>}
+                            {job.publishedUrl && (
+                              <a className="text-[10px] text-cyan-300 underline" href={job.publishedUrl} target="_blank" rel="noreferrer">
+                                게시 URL 열기
+                              </a>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-[10px] text-slate-400 leading-relaxed">
+                    이동 중(지하철/버스) 사용을 위해 모바일 단계형 UI로 구성되었습니다. 작성 내용과 예약 상태는 자동 저장됩니다.
+                  </div>
                 </div>
               </div>
             </div>

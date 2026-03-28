@@ -194,6 +194,32 @@ export default function Panel12Section(props: Props) {
                         onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, bgmVolume: Number(e.target.value) } }))}
                         className="w-full accent-emerald-300"
                       />
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">TTS 중 BGM 덕킹</label>
+                        <button
+                          onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, bgmDuckingEnabled: !prev.finalVideo.bgmDuckingEnabled } }))}
+                          className={`px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.bgmDuckingEnabled ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
+                        >
+                          {ui.finalVideo.bgmDuckingEnabled ? 'ON' : 'OFF'}
+                        </button>
+                      </div>
+                      {ui.finalVideo.bgmDuckingEnabled && (
+                        <>
+                          <div className="flex items-center justify-between gap-3">
+                            <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">덕킹 강도</label>
+                            <span className="text-[10px] text-emerald-100 font-bold">-{ui.finalVideo.bgmDuckingDb} dB</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="3"
+                            max="18"
+                            step="1"
+                            value={ui.finalVideo.bgmDuckingDb}
+                            onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, bgmDuckingDb: Number(e.target.value) } }))}
+                            className="w-full accent-emerald-300"
+                          />
+                        </>
+                      )}
                     </>
                   )}
                   <div className="flex items-center justify-between gap-3 pt-1">
@@ -207,15 +233,35 @@ export default function Panel12Section(props: Props) {
                   </div>
                   {ui.finalVideo.sfxEnabled && (
                     <>
-                      <select
-                        value={ui.finalVideo.sfxTrack}
-                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxTrack: e.target.value } }))}
-                        className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
-                      >
-                        {SFX_LIBRARY.map(track => (
-                          <option key={track.path} value={track.path}>{track.label}</option>
-                        ))}
-                      </select>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxMode: 'auto' } }))}
+                          className={`py-2 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.sfxMode === 'auto' ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
+                        >
+                          자동 추천
+                        </button>
+                        <button
+                          onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxMode: 'single' } }))}
+                          className={`py-2 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.sfxMode === 'single' ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
+                        >
+                          수동 고정
+                        </button>
+                      </div>
+                      {ui.finalVideo.sfxMode === 'single' ? (
+                        <select
+                          value={ui.finalVideo.sfxTrack}
+                          onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxTrack: e.target.value } }))}
+                          className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
+                        >
+                          {SFX_LIBRARY.map(track => (
+                            <option key={track.path} value={track.path}>{track.label}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <p className="text-[10px] text-emerald-100/90 bg-emerald-500/10 border border-emerald-300/20 rounded-lg px-3 py-2">
+                          대본 키워드(긴장/유머/사건/총격/전화/강조)를 분석해 컷 전환 효과음을 자동 추천합니다.
+                        </p>
+                      )}
                       <div className="flex items-center justify-between gap-3">
                         <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">SFX 볼륨</label>
                         <span className="text-[10px] text-emerald-100 font-bold">{ui.finalVideo.sfxVolume}%</span>
