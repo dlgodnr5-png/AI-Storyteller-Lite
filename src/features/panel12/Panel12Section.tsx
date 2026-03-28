@@ -171,23 +171,26 @@ export default function Panel12Section(props: Props) {
                       <div className="space-y-1 pt-1">
                         <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest block">자막 템플릿</label>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                          <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
+                          <div
+                            className="grid grid-cols-2 gap-2 h-[478px] overflow-y-auto custom-scrollbar pr-1"
+                            style={{ gridAutoRows: '235px' }}
+                          >
                             {BUILTIN_SUBTITLE_TEMPLATES.map(template => {
                               const isActive = previewTemplate?.id === template.id;
                               return (
                                 <div
                                   key={template.id}
                                   onMouseEnter={() => setPreviewTemplateId(template.id)}
-                                  className={`text-left border rounded-lg p-2 transition-all space-y-2 ${isActive ? 'bg-slate-700 border-emerald-400/60' : 'bg-slate-800/80 border-white/10 hover:bg-slate-700'}`}
+                                  className={`h-full text-left border rounded-lg p-2 transition-all flex flex-col gap-2 ${isActive ? 'bg-slate-700 border-emerald-400/60' : 'bg-slate-800/80 border-white/10 hover:bg-slate-700'}`}
                                 >
                                   <button
                                     onClick={() => {
                                       setPreviewTemplateId(template.id);
                                       applyBuiltinSubtitleTemplate(template.id);
                                     }}
-                                    className="w-full text-left"
+                                    className="w-full text-left flex-1"
                                   >
-                                    <div className="aspect-[9/16] rounded-md overflow-hidden border border-white/10 bg-slate-900 relative">
+                                    <div className="aspect-video rounded-md overflow-hidden border border-white/10 bg-slate-900 relative">
                                       <img
                                         src={templatePreviewOverrides[template.id] || getBuiltinTemplatePreview(template)}
                                         alt={template.name}
@@ -205,7 +208,7 @@ export default function Panel12Section(props: Props) {
                                         {template.config.subtitlePreset}
                                       </span>
                                     </p>
-                                    <p className="text-[9px] text-slate-300 mt-1">{template.description}</p>
+                                    <p className="text-[9px] text-slate-300 mt-1 line-clamp-2">{template.description}</p>
                                   </button>
                                   <div className="grid grid-cols-2 gap-2">
                                     <label className="text-center text-[9px] font-black bg-black/40 border border-white/10 rounded-md py-1 cursor-pointer hover:bg-black/60">
