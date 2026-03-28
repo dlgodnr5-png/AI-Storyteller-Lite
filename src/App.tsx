@@ -209,6 +209,15 @@ type SavedSubtitleTemplate = {
   subtitleUsePerCutKeywords: boolean;
 };
 
+type BuiltinSubtitleTemplate = {
+  id: string;
+  name: string;
+  description: string;
+  sample: string;
+  previewImage?: string;
+  config: Omit<SavedSubtitleTemplate, 'name'>;
+};
+
 const SLIDE_MOTIONS: { id: SlideMotionType; label: string }[] = [
   { id: 'zoom_in', label: '확대' },
   { id: 'zoom_out', label: '축소' },
@@ -307,6 +316,7 @@ const SUBTITLE_PRESETS: Record<SubtitlePreset, {
 };
 
 const SUBTITLE_TEMPLATE_LS_KEY = 'ai_storyteller_subtitle_templates_v1';
+const SUBTITLE_TEMPLATE_PREVIEW_LS_KEY = 'ai_storyteller_subtitle_template_previews_v1';
 
 const getRenderDimensions = (ratio: string, resolution: RenderResolution) => {
   const base = RATIO_DIMENSIONS[ratio] || RATIO_DIMENSIONS['9:16'];
@@ -576,17 +586,137 @@ const KEYWORD_STOPWORDS = new Set([
 ]);
 
 const extractTopKeywords = (text: string, limit = 6) => {
-  const tokens = (text.match(/[A-Za-z]{3,}|[가-힣]{2,}/g) || [])
-    .map(cleanWordToken)
-    .filter(token => token.length >= 2 && !KEYWORD_STOPWORDS.has(token));
-
+  const rawTokens = text.match(/[A-Za-z0-9]{2,}|[가-힣0-9]{2,}/g) || [];
   const counts = new Map<string, number>();
-  tokens.forEach(token => counts.set(token, (counts.get(token) || 0) + 1));
+
+  rawTokens.forEach(raw => {
+    const token = cleanWordToken(raw);
+    if (!token || token.length < 2 || KEYWORD_STOPWORDS.has(token)) return;
+
+    let weight = 1;
+    if (/\d/.test(raw)) weight += 1.5; // 숫자 포함 키워드 우선
+    if (/^[A-Z][A-Za-z0-9]+$/.test(raw) || /[A-Z]{2,}/.test(raw)) weight += 1.2; // 브랜드/영문 고유명사
+    if (/[가-힣]{3,}/.test(raw) && !/(하다|되는|있는|에서|으로|에게|대한)$/.test(raw)) weight += 0.6; // 한국어 고유명사 추정
+    if (token.length >= 5) weight += 0.25;
+
+    counts.set(token, (counts.get(token) || 0) + weight);
+  });
 
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, limit)
     .map(([token]) => token);
+};
+
+const PRESET_SAMPLE_TEXT: Record<SubtitlePreset, string> = {
+  shorts: '충격 반전! 핵심만 1초만에 꽂히게',
+  docu: '차분하게 핵심 맥락을 전달하는 다큐 톤',
+  lecture: '또렷하고 안정적인 학습/설명용 자막',
+};
+
+const BUILTIN_SUBTITLE_TEMPLATES: BuiltinSubtitleTemplate[] = [
+  {
+    id: 'promo-product',
+    name: '상품광고',
+    description: '강한 CTA, 빠른 강조, 전환 유도',
+    sample: '지금 안 보면 손해! 오늘만 특가',
+    config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleMaxChars: 18, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'pop', subtitleKeywords: '한정,특가,무료,지금,혜택', subtitleUsePerCutKeywords: false },
+  },
+  {
+    id: 'news-urgent',
+    name: '뉴스 브리핑',
+    description: '신뢰감 있는 헤드라인형',
+    sample: '속보: 핵심 내용 30초 요약',
+    config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleMaxChars: 26, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'fade', subtitleKeywords: '속보,현장,단독,브리핑,핵심', subtitleUsePerCutKeywords: false },
+  },
+  {
+    id: 'comedy-skit',
+    name: '코믹 숏폼',
+    description: '리액션 중심, 강한 단어 하이라이트',
+    sample: '이 장면에서 다들 터졌습니다',
+    config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleMaxChars: 20, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'pop', subtitleKeywords: '폭소,레전드,미친,반전,웃김', subtitleUsePerCutKeywords: true },
+  },
+  {
+    id: 'pet-animal',
+    name: '동물/펫',
+    description: '귀여움 강조, 짧고 또렷한 문장',
+    sample: '심쿵 포인트 모아보기',
+    config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleMaxChars: 19, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '귀여움,심쿵,댕댕이,냥냥이,힐링', subtitleUsePerCutKeywords: true },
+  },
+  {
+    id: 'senior-health',
+    name: '시니어 정보',
+    description: '가독성 우선, 안정적인 템포',
+    sample: '천천히, 정확하게 핵심 전달',
+    config: { subtitlePreset: 'lecture', subtitlePosition: 'middle', subtitleMaxChars: 30, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '건강,주의,습관,관리,예방', subtitleUsePerCutKeywords: false },
+  },
+  {
+    id: 'motivation',
+    name: '동기부여',
+    description: '강조 단어 중심 임팩트',
+    sample: '딱 1년만, 인생이 바뀝니다',
+    config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleMaxChars: 22, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'pop', subtitleKeywords: '도전,성공,습관,목표,실행', subtitleUsePerCutKeywords: true },
+  },
+  {
+    id: 'knowledge-bite',
+    name: '지식/교양',
+    description: '정보 전달 최적화',
+    sample: '모르면 손해보는 핵심 상식',
+    config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleMaxChars: 27, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '핵심,원리,사실,정리,요약', subtitleUsePerCutKeywords: false },
+  },
+  {
+    id: 'review-tech',
+    name: '리뷰/언박싱',
+    description: '기능/가격/결론 강조',
+    sample: '실사용 기준으로 딱 정리',
+    config: { subtitlePreset: 'lecture', subtitlePosition: 'bottom', subtitleMaxChars: 24, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'fade', subtitleKeywords: '장점,단점,가격,성능,결론', subtitleUsePerCutKeywords: true },
+  },
+  {
+    id: 'vlog-daily',
+    name: '브이로그',
+    description: '자연스러운 흐름, 감성 유지',
+    sample: '소소하지만 확실한 하루 기록',
+    config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleMaxChars: 25, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'fade', subtitleKeywords: '일상,기록,루틴,감성,하루', subtitleUsePerCutKeywords: false },
+  },
+  {
+    id: 'interview-talk',
+    name: '인터뷰',
+    description: '질문-답변 구조 가독성 최적화',
+    sample: '질문 하나로 바뀐 관점',
+    config: { subtitlePreset: 'lecture', subtitlePosition: 'middle', subtitleMaxChars: 28, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '질문,답변,경험,핵심,인사이트', subtitleUsePerCutKeywords: false },
+  },
+  {
+    id: 'crime-issue',
+    name: '사건/이슈',
+    description: '긴장감, 핵심 단어 강한 강조',
+    sample: '순식간에 벌어진 충격 상황',
+    config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleMaxChars: 21, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'pop', subtitleKeywords: '충격,단독,증거,현장,진실', subtitleUsePerCutKeywords: true },
+  },
+  {
+    id: 'healing-emotion',
+    name: '감성/힐링',
+    description: '부드러운 등장, 따뜻한 톤',
+    sample: '마음이 편해지는 30초',
+    config: { subtitlePreset: 'docu', subtitlePosition: 'middle', subtitleMaxChars: 24, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'fade', subtitleKeywords: '힐링,감성,위로,따뜻함,휴식', subtitleUsePerCutKeywords: false },
+  },
+  {
+    id: 'mystery-horror',
+    name: '미스터리/공포',
+    description: '암전 분위기, 강한 키워드',
+    sample: '절대 혼자 보지 마세요',
+    config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleMaxChars: 20, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'pop', subtitleKeywords: '미스터리,공포,소름,경고,반전', subtitleUsePerCutKeywords: true },
+  },
+  {
+    id: 'kids-family',
+    name: '키즈/패밀리',
+    description: '선명하고 쉬운 문장, 밝은 템포',
+    sample: '아이도 바로 이해하는 설명',
+    config: { subtitlePreset: 'lecture', subtitlePosition: 'bottom', subtitleMaxChars: 22, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '재미,배움,놀이,친구,가족', subtitleUsePerCutKeywords: false },
+  },
+];
+
+const getBuiltinTemplatePreview = (template: BuiltinSubtitleTemplate) => {
+  return template.previewImage || `/subtitle_templates/${template.id}.jpg`;
 };
 
 const parseKeywordSet = (raw: string) => {
@@ -734,6 +864,14 @@ export default function App() {
 
   const [results, setResults] = useState<any[]>([]);
   const [subtitleTemplates, setSubtitleTemplates] = useState<SavedSubtitleTemplate[]>([]);
+  const [templatePreviewOverrides, setTemplatePreviewOverrides] = useState<Record<string, string>>({});
+  const initialUiRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (!initialUiRef.current) {
+      initialUiRef.current = JSON.parse(JSON.stringify(ui));
+    }
+  }, [ui]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -770,6 +908,23 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(SUBTITLE_TEMPLATE_LS_KEY, JSON.stringify(subtitleTemplates));
   }, [subtitleTemplates]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SUBTITLE_TEMPLATE_PREVIEW_LS_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        setTemplatePreviewOverrides(parsed);
+      }
+    } catch {
+      setTemplatePreviewOverrides({});
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(SUBTITLE_TEMPLATE_PREVIEW_LS_KEY, JSON.stringify(templatePreviewOverrides));
+  }, [templatePreviewOverrides]);
 
   useEffect(() => {
     setUi(prev => ({ 
@@ -1332,15 +1487,72 @@ ${stylePrompt}
     }
   };
 
-  const saveProject = () => {
-    const data = JSON.stringify({ ui, results, timestamp: new Date().toISOString() });
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `project_${new Date().getTime()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const saveProject = async () => {
+    const safeTitleRaw = (ui.selectedHookTitle || ui.filters.query || 'project').trim();
+    const tenChars = Array.from(safeTitleRaw).slice(0, 10).join('') || 'project';
+    const safeTitle = tenChars.replace(/[<>:"/\\|?*\x00-\x1F]/g, '').replace(/\s+/g, '_');
+    const folderRoot = `Ai-Storyteller-Lite/${safeTitle}`;
+
+    const projectPayload = {
+      meta: {
+        format: 'ai-storyteller-lite-project-v2',
+        requiresAssets: true,
+        note: 'JSON 단독 로드는 자산 누락 시 실패할 수 있습니다. 저장한 ZIP 전체를 보관하세요.',
+        folderRoot,
+      },
+      ui,
+      results,
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      const zip = new JSZip();
+      zip.folder(folderRoot)?.file('project.json', JSON.stringify(projectPayload, null, 2));
+      zip.folder(folderRoot)?.file('README.txt', '이 프로젝트는 JSON + 자산 번들 ZIP으로 저장되었습니다. JSON만 단독으로 불러오면 일부 자산이 누락될 수 있습니다.');
+
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Ai-Storyteller-Lite_${safeTitle}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      alert(`프로젝트를 ZIP으로 저장했습니다. (폴더: ${folderRoot})`);
+    } catch (err) {
+      console.error(err);
+      alert('프로젝트 ZIP 저장에 실패했습니다.');
+    }
+  };
+
+  const handleNewProject = () => {
+    const ok = window.confirm('새 프로젝트를 시작할까요? 현재 작업 내용은 저장하지 않으면 사라집니다.');
+    if (!ok) return;
+    if (initialUiRef.current) {
+      setUi(JSON.parse(JSON.stringify(initialUiRef.current)));
+    }
+    setResults([]);
+    setPreviewingId(null);
+    setPreviewLoading(false);
+    alert('새 프로젝트를 시작했습니다.');
+  };
+
+  const collectBlobRefs = (obj: any): string[] => {
+    const refs: string[] = [];
+    const walk = (value: any) => {
+      if (typeof value === 'string' && value.startsWith('blob:')) {
+        refs.push(value);
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach(walk);
+        return;
+      }
+      if (value && typeof value === 'object') {
+        Object.values(value).forEach(walk);
+      }
+    };
+    walk(obj);
+    return refs;
   };
 
   const loadProject = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1350,6 +1562,17 @@ ${stylePrompt}
     reader.onload = (event) => {
       try {
         const parsed = JSON.parse(event.target?.result as string);
+        if (parsed?.meta?.requiresAssets) {
+          alert('이 프로젝트 파일은 자산 번들(ZIP)을 전제로 저장되었습니다. JSON만 단독 불러오기는 지원하지 않습니다.');
+          return;
+        }
+
+        const blobRefs = collectBlobRefs(parsed?.ui || {});
+        if (blobRefs.length > 0) {
+          alert('이 JSON은 blob 자산 참조를 포함해 단독으로 불러올 수 없습니다. 저장 당시 ZIP 전체 파일을 사용하세요.');
+          return;
+        }
+
         if (parsed.ui) setUi(parsed.ui);
         if (parsed.results) setResults(parsed.results);
         alert('프로젝트를 성공적으로 불러왔습니다.');
@@ -1358,6 +1581,7 @@ ${stylePrompt}
       }
     };
     reader.readAsText(file);
+    e.currentTarget.value = '';
   };
 
   // --- Render Helpers ---
@@ -1774,6 +1998,44 @@ ${stylePrompt}
     }));
   };
 
+  const applyBuiltinSubtitleTemplate = (templateId: string) => {
+    const selected = BUILTIN_SUBTITLE_TEMPLATES.find(t => t.id === templateId);
+    if (!selected) return;
+    setUi(prev => ({
+      ...prev,
+      finalVideo: {
+        ...prev.finalVideo,
+        subtitlePreset: selected.config.subtitlePreset,
+        subtitlePosition: selected.config.subtitlePosition,
+        subtitleMaxChars: selected.config.subtitleMaxChars,
+        subtitleWordHighlight: selected.config.subtitleWordHighlight,
+        subtitleHighlightStrength: selected.config.subtitleHighlightStrength,
+        subtitleEntryAnimation: selected.config.subtitleEntryAnimation,
+        subtitleKeywords: selected.config.subtitleKeywords,
+        subtitleUsePerCutKeywords: selected.config.subtitleUsePerCutKeywords,
+      },
+    }));
+  };
+
+  const handleTemplatePreviewUpload = (templateId: string, file?: File | null) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const url = String(ev.target?.result || '');
+      if (!url) return;
+      setTemplatePreviewOverrides(prev => ({ ...prev, [templateId]: url }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const resetTemplatePreview = (templateId: string) => {
+    setTemplatePreviewOverrides(prev => {
+      const next = { ...prev };
+      delete next[templateId];
+      return next;
+    });
+  };
+
   const saveCurrentSubtitleTemplate = () => {
     const name = window.prompt('템플릿 이름을 입력하세요 (예: 쇼츠강조형)')?.trim();
     if (!name) return;
@@ -2097,6 +2359,13 @@ ${JSON.stringify(cutPayload)}`,
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={handleNewProject}
+            className="flex items-center gap-2 bg-cyan-500/20 border border-cyan-300/30 text-cyan-100 px-5 py-2.5 rounded-full hover:bg-cyan-500/30 transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="text-sm font-bold">새프로젝트</span>
+          </button>
           <button 
             onClick={() => setUi(prev => ({ ...prev, happyDayOpen: true }))}
             className="bg-gradient-to-r from-orange-500 to-pink-500 text-white text-xs font-black px-5 py-2.5 rounded-full shadow-lg hover:brightness-110 transition-all"
@@ -2110,10 +2379,13 @@ ${JSON.stringify(cutPayload)}`,
             <Save className="w-4 h-4" />
             <span className="text-sm font-bold">프로젝트 저장</span>
           </button>
-          <label className="flex items-center gap-2 bg-white/5 border border-white/10 px-5 py-2.5 rounded-full hover:bg-white/10 transition-all cursor-pointer">
+          <label className="relative group flex items-center gap-2 bg-white/5 border border-white/10 px-5 py-2.5 rounded-full hover:bg-white/10 transition-all cursor-pointer">
             <Download className="w-4 h-4" />
             <span className="text-sm font-bold">불러오기</span>
             <input type="file" accept=".json" onChange={loadProject} className="hidden" />
+            <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-72 -translate-x-1/2 rounded-xl border border-amber-300/40 bg-[#10192f] p-3 text-[10px] text-amber-100 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
+              JSON 파일은 저장 당시 필요한 자산이 모두 있어야 정상 복원됩니다. 자산이 없으면 불러오기에 실패할 수 있습니다. ZIP 전체 보관을 권장합니다.
+            </div>
           </label>
           <button 
             onClick={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
@@ -3150,30 +3422,71 @@ ${JSON.stringify(cutPayload)}`,
                         <>
                           <div className="space-y-1 pt-1">
                             <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest block">자막 템플릿</label>
-                            <div className="grid grid-cols-4 gap-2">
-                              <button
-                                onClick={() => applySubtitleTemplate('shorts')}
-                                className="bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] font-black text-white hover:bg-slate-700 transition-all"
-                              >
-                                쇼츠
-                              </button>
-                              <button
-                                onClick={() => applySubtitleTemplate('docu')}
-                                className="bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] font-black text-white hover:bg-slate-700 transition-all"
-                              >
-                                다큐
-                              </button>
-                              <button
-                                onClick={() => applySubtitleTemplate('lecture')}
-                                className="bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] font-black text-white hover:bg-slate-700 transition-all"
-                              >
-                                강의
-                              </button>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+                              {BUILTIN_SUBTITLE_TEMPLATES.map(template => (
+                                <div
+                                  key={template.id}
+                                  className="text-left bg-slate-800/80 border border-white/10 rounded-lg p-2 hover:bg-slate-700 transition-all space-y-2"
+                                >
+                                  <button
+                                    onClick={() => applyBuiltinSubtitleTemplate(template.id)}
+                                    className="w-full text-left"
+                                  >
+                                    <div className="aspect-[16/9] rounded-md overflow-hidden border border-white/10 bg-slate-900 relative">
+                                      <img
+                                        src={templatePreviewOverrides[template.id] || getBuiltinTemplatePreview(template)}
+                                        alt={template.name}
+                                        className="w-full h-full object-cover"
+                                        onError={(e) => {
+                                          e.currentTarget.src = `https://picsum.photos/seed/subtitle-${template.id}/640/360`;
+                                        }}
+                                      />
+                                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                                      <p className="absolute left-2 bottom-2 text-[10px] font-black text-white">{template.sample}</p>
+                                    </div>
+                                    <p className="text-[11px] font-black text-white flex items-center justify-between gap-2 mt-2">
+                                      <span>{template.name}</span>
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-400/20 text-emerald-200 border border-emerald-300/25">
+                                        {template.config.subtitlePreset}
+                                      </span>
+                                    </p>
+                                    <p className="text-[9px] text-slate-300 mt-1">{template.description}</p>
+                                  </button>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <label className="text-center text-[9px] font-black bg-black/40 border border-white/10 rounded-md py-1 cursor-pointer hover:bg-black/60">
+                                      이미지 선택
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        className="hidden"
+                                        onChange={(e) => {
+                                          handleTemplatePreviewUpload(template.id, e.target.files?.[0] || null);
+                                          e.currentTarget.value = '';
+                                        }}
+                                      />
+                                    </label>
+                                    <button
+                                      onClick={() => resetTemplatePreview(template.id)}
+                                      className="text-[9px] font-black bg-black/40 border border-white/10 rounded-md py-1 hover:bg-black/60"
+                                    >
+                                      이미지 초기화
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 pt-1">
                               <button
                                 onClick={saveCurrentSubtitleTemplate}
                                 className="bg-emerald-500/80 border border-emerald-300/40 rounded-lg px-2 py-1.5 text-[10px] font-black text-black hover:bg-emerald-400 transition-all"
                               >
-                                저장
+                                현재 설정 저장
+                              </button>
+                              <button
+                                onClick={() => applySubtitleTemplate('shorts')}
+                                className="bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] font-black text-white hover:bg-slate-700 transition-all"
+                              >
+                                빠른 기본값
                               </button>
                             </div>
                             <div className="grid grid-cols-2 gap-2 pt-1">
@@ -3204,14 +3517,19 @@ ${JSON.stringify(cutPayload)}`,
                                     <div key={template.name} className="flex items-center gap-1 bg-slate-900/70 border border-white/10 rounded-lg px-2 py-1">
                                       <button
                                         onClick={() => applySavedSubtitleTemplate(template)}
-                                        className="text-[10px] font-bold text-slate-100 hover:text-white flex items-center gap-1"
+                                        className="text-[10px] font-bold text-slate-100 hover:text-white flex flex-col items-start gap-1"
                                       >
-                                        {template.name}
-                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-400/20 text-emerald-200 border border-emerald-300/25">
-                                          {template.subtitlePreset}
+                                        <span className="flex items-center gap-1">
+                                          {template.name}
+                                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-400/20 text-emerald-200 border border-emerald-300/25">
+                                            {template.subtitlePreset}
+                                          </span>
+                                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-200 border border-white/10">
+                                            {template.subtitleHighlightStrength}
+                                          </span>
                                         </span>
-                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-200 border border-white/10">
-                                          {template.subtitleHighlightStrength}
+                                        <span className="text-[9px] text-slate-400 font-medium">
+                                          {PRESET_SAMPLE_TEXT[template.subtitlePreset]}
                                         </span>
                                       </button>
                                       <button
