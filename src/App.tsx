@@ -263,6 +263,7 @@ type YouTubeAuthSession = {
   expiresAt: number;
   channelTitle: string;
   channelHandle: string;
+  email: string;
 };
 type SavedSubtitleTemplate = {
   name: string;
@@ -423,6 +424,8 @@ const SOCIAL_PLATFORM_META: Array<{ id: PublishPlatform; label: string; color: s
   { id: 'threads', label: 'Threads', color: 'from-slate-700 to-slate-900', available: false },
   { id: 'x', label: 'X', color: 'from-sky-700 to-slate-900', available: false },
 ];
+
+const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
 const getRenderDimensions = (ratio: string, resolution: RenderResolution) => {
   const base = RATIO_DIMENSIONS[ratio] || RATIO_DIMENSIONS['9:16'];
@@ -1029,8 +1032,11 @@ export default function App() {
       mobileStep: 1,
       notifyEmail: '',
       accounts: [
-        { id: 'yt-main', platform: 'youtube' as PublishPlatform, name: 'YouTube 기본 채널', handle: '@your-channel', connected: false, lastSyncedAt: '' },
+        { id: 'yt-main', platform: 'youtube' as PublishPlatform, name: 'YouTube 기본 채널', handle: '@your-channel', email: '', connected: false, lastSyncedAt: '' },
       ],
+      ownerEmail: '',
+      adminEmails: [] as string[],
+      pendingAdminEmail: '',
       draft: {
         title: '',
         description: '',
@@ -1085,6 +1091,20 @@ export default function App() {
   const env = (import.meta as any).env || {};
   const googleClientId = env.VITE_GOOGLE_CLIENT_ID || '';
   const googleRedirectUri = env.VITE_GOOGLE_REDIRECT_URI || `${window.location.origin}/oauth/google/callback`;
+  const envAdminEmails = useMemo(
+    () => String(env.VITE_ADMIN_EMAILS || '').split(',').map(normalizeEmail).filter(Boolean),
+    [env.VITE_ADMIN_EMAILS],
+  );
+  const currentUserEmail = normalizeEmail(youtubeAuth?.email || '');
+  const effectiveAdminEmails = useMemo(() => {
+    const list = [
+      ...envAdminEmails,
+      ...ui.publishing.adminEmails.map(normalizeEmail),
+      normalizeEmail(ui.publishing.ownerEmail || ''),
+    ].filter(Boolean);
+    return Array.from(new Set(list));
+  }, [envAdminEmails, ui.publishing.adminEmails, ui.publishing.ownerEmail]);
+  const isPublishAdmin = Boolean(currentUserEmail && effectiveAdminEmails.includes(currentUserEmail));
 
   useEffect(() => {
     if (!initialUiRef.current) {
@@ -1166,6 +1186,8 @@ export default function App() {
           ...prev.publishing,
           notifyEmail: typeof parsed.notifyEmail === 'string' ? parsed.notifyEmail : prev.publishing.notifyEmail,
           mobileStep: Number.isFinite(parsed.mobileStep) ? Math.min(5, Math.max(1, Number(parsed.mobileStep))) : prev.publishing.mobileStep,
+          ownerEmail: typeof parsed.ownerEmail === 'string' ? parsed.ownerEmail : prev.publishing.ownerEmail,
+          adminEmails: Array.isArray(parsed.adminEmails) ? parsed.adminEmails : prev.publishing.adminEmails,
           draft: {
             ...prev.publishing.draft,
             ...(parsed.draft || {}),
@@ -1185,6 +1207,8 @@ export default function App() {
       JSON.stringify({
         notifyEmail: ui.publishing.notifyEmail,
         mobileStep: ui.publishing.mobileStep,
+        ownerEmail: ui.publishing.ownerEmail,
+        adminEmails: ui.publishing.adminEmails,
         draft: ui.publishing.draft,
         jobs: ui.publishing.jobs,
         accounts: ui.publishing.accounts,
@@ -1207,6 +1231,7 @@ export default function App() {
         ...prev,
         publishing: {
           ...prev.publishing,
+          ownerEmail: prev.publishing.ownerEmail || parsed.email || '',
           accounts: prev.publishing.accounts.map(account =>
             account.platform === 'youtube'
               ? {
@@ -1214,6 +1239,7 @@ export default function App() {
                   connected: true,
                   name: parsed.channelTitle || account.name,
                   handle: parsed.channelHandle || account.handle,
+                  email: parsed.email || account.email || '',
                   lastSyncedAt: new Date().toISOString(),
                 }
               : account,
@@ -1250,6 +1276,12 @@ export default function App() {
       }
 
       try {
+        const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const userInfo = userInfoRes.ok ? await userInfoRes.json() : {};
+        const userEmail = normalizeEmail(String(userInfo?.email || ''));
+
         const res = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', {
           headers: { Authorization: `Bearer ${accessToken}` },
         });
@@ -1265,6 +1297,7 @@ export default function App() {
           expiresAt: Date.now() + Math.max(60, expiresIn - 30) * 1000,
           channelTitle,
           channelHandle,
+          email: userEmail,
         };
 
         localStorage.setItem(YT_AUTH_SESSION_LS_KEY, JSON.stringify(session));
@@ -1274,6 +1307,7 @@ export default function App() {
           publishing: {
             ...prev.publishing,
             mobileStep: 1,
+            ownerEmail: prev.publishing.ownerEmail || userEmail,
             accounts: prev.publishing.accounts.map(account =>
               account.platform === 'youtube'
                 ? {
@@ -1281,6 +1315,7 @@ export default function App() {
                     connected: true,
                     name: channelTitle,
                     handle: channelHandle,
+                    email: userEmail,
                     lastSyncedAt: new Date().toISOString(),
                   }
                 : account,
@@ -2163,6 +2198,7 @@ ${stylePrompt}
                 connected: false,
                 name: 'YouTube 기본 채널',
                 handle: '@your-channel',
+                email: '',
                 lastSyncedAt: '',
               }
             : account,
@@ -2170,6 +2206,52 @@ ${stylePrompt}
       },
     }));
     alert('YouTube 계정 연결이 해제되었습니다.');
+  };
+
+  const claimOwnerFromCurrentAccount = () => {
+    if (!currentUserEmail) {
+      alert('먼저 YouTube 계정을 연결하고 이메일을 확인하세요.');
+      return;
+    }
+    setUi(prev => ({
+      ...prev,
+      publishing: {
+        ...prev.publishing,
+        ownerEmail: currentUserEmail,
+        adminEmails: Array.from(new Set([...prev.publishing.adminEmails.map(normalizeEmail), currentUserEmail])),
+      },
+    }));
+    alert('현재 계정을 소유자(owner)로 지정했습니다.');
+  };
+
+  const addAdminEmail = () => {
+    const candidate = normalizeEmail(ui.publishing.pendingAdminEmail || '');
+    if (!candidate) return;
+    if (!isPublishAdmin) {
+      alert('관리자만 이메일 권한을 추가할 수 있습니다.');
+      return;
+    }
+
+    setUi(prev => ({
+      ...prev,
+      publishing: {
+        ...prev.publishing,
+        pendingAdminEmail: '',
+        adminEmails: Array.from(new Set([...prev.publishing.adminEmails.map(normalizeEmail), candidate])),
+      },
+    }));
+  };
+
+  const removeAdminEmail = (email: string) => {
+    if (!isPublishAdmin) return;
+    const normalized = normalizeEmail(email);
+    setUi(prev => ({
+      ...prev,
+      publishing: {
+        ...prev.publishing,
+        adminEmails: prev.publishing.adminEmails.map(normalizeEmail).filter(item => item !== normalized),
+      },
+    }));
   };
 
   const sendPublishEmailNotification = (job: any) => {
@@ -2242,6 +2324,11 @@ ${stylePrompt}
   };
 
   const queueYouTubePublish = () => {
+    if (!isPublishAdmin) {
+      alert('관리자 권한이 있는 이메일만 예약 발행할 수 있습니다.');
+      return;
+    }
+
     if (!youtubeAuth?.accessToken || youtubeAuth.expiresAt <= Date.now()) {
       alert('YouTube 인증이 만료되었거나 없습니다. 계정을 다시 연결해 주세요.');
       return;
@@ -4349,6 +4436,7 @@ ${JSON.stringify(cutPayload)}`,
                         <div>
                           <p className="text-xs font-black text-white">{ui.publishing.accounts[0]?.name || 'YouTube 기본 채널'}</p>
                           <p className="text-[10px] text-slate-400">{ui.publishing.accounts[0]?.handle || '@your-channel'}</p>
+                          <p className="text-[10px] text-slate-400">{ui.publishing.accounts[0]?.email || '이메일 미확인'}</p>
                           {ui.publishing.accounts[0]?.lastSyncedAt && (
                             <p className="text-[10px] text-emerald-200/80 mt-1">동기화: {new Date(ui.publishing.accounts[0].lastSyncedAt).toLocaleString()}</p>
                           )}
@@ -4369,6 +4457,50 @@ ${JSON.stringify(cutPayload)}`,
                             </button>
                           )}
                         </div>
+                      </div>
+
+                      <div className="rounded-xl border border-amber-300/20 bg-amber-500/10 p-3 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-[11px] font-black text-amber-100">권한 상태</p>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full border ${isPublishAdmin ? 'bg-emerald-500/20 border-emerald-300/30 text-emerald-100' : 'bg-rose-500/20 border-rose-300/30 text-rose-100'}`}>
+                            {isPublishAdmin ? 'ADMIN' : 'VIEWER'}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-amber-100/90">현재 로그인 이메일: {currentUserEmail || '미확인'}</p>
+                        <p className="text-[10px] text-amber-100/90">소유자(owner): {ui.publishing.ownerEmail || '미설정'}</p>
+                        {!ui.publishing.ownerEmail && currentUserEmail && (
+                          <button
+                            onClick={claimOwnerFromCurrentAccount}
+                            className="w-full bg-amber-400 text-black font-black py-2 rounded-lg text-[11px]"
+                          >
+                            현재 계정을 소유자로 지정
+                          </button>
+                        )}
+                        {isPublishAdmin && (
+                          <>
+                            <div className="flex items-center gap-2">
+                              <input
+                                value={ui.publishing.pendingAdminEmail}
+                                onChange={(e) => setUi(prev => ({ ...prev, publishing: { ...prev.publishing, pendingAdminEmail: e.target.value } }))}
+                                placeholder="관리자 이메일 추가"
+                                className="flex-1 bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px] outline-none"
+                              />
+                              <button onClick={addAdminEmail} className="px-3 py-2 rounded-lg bg-emerald-400 text-black text-[11px] font-black">추가</button>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {effectiveAdminEmails.map(email => (
+                                <button
+                                  key={email}
+                                  onClick={() => removeAdminEmail(email)}
+                                  className="px-2 py-1 rounded-full text-[10px] border border-white/15 bg-black/30 text-slate-100"
+                                  title="클릭 시 제거"
+                                >
+                                  {email}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   )}
@@ -4463,10 +4595,12 @@ ${JSON.stringify(cutPayload)}`,
                       />
                       <button
                         onClick={queueYouTubePublish}
+                        disabled={!isPublishAdmin}
                         className="w-full bg-gradient-to-r from-red-500 to-orange-500 text-white font-black py-3 rounded-xl hover:brightness-110 transition-all"
                       >
                         YouTube 예약 발행 등록
                       </button>
+                      {!isPublishAdmin && <p className="text-[10px] text-rose-300">관리자 이메일 권한이 있어야 발행할 수 있습니다.</p>}
                       <p className="text-[10px] text-slate-400">메일 알림은 브라우저 mailto 훅으로 연결됩니다. 서버 메일러 연동 시 자동 전송으로 교체 가능합니다.</p>
                     </div>
                   )}
