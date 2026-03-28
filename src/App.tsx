@@ -670,6 +670,116 @@ const parseKeywordSet = (raw: string) => {
   );
 };
 
+const parseSrtToCuts = (text: string) => {
+  if (!text.includes('-->')) return [] as string[];
+  const blocks = text
+    .replace(/\r/g, '')
+    .split(/\n\s*\n/)
+    .map(block => block.trim())
+    .filter(Boolean);
+
+  const cuts: string[] = [];
+  blocks.forEach(block => {
+    const hasTiming = /\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}/.test(block);
+    if (!hasTiming) return;
+
+    const lines = block
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean)
+      .filter(line => !/^\d+$/.test(line))
+      .filter(line => !/\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}/.test(line));
+    const merged = lines.join(' ').replace(/\s+/g, ' ').trim();
+    if (merged) cuts.push(merged);
+  });
+  return cuts;
+};
+
+const splitScriptToCuts = (text: string, isShorts: boolean) => {
+  const clean = text.replace(/\r/g, '\n').trim();
+  if (!clean) return [] as string[];
+
+  const srtCuts = parseSrtToCuts(clean);
+  if (srtCuts.length > 0) return srtCuts;
+
+  const target = isShorts ? 38 : 75;
+  const minLen = isShorts ? 30 : 60;
+  const maxLen = isShorts ? 45 : 90;
+
+  const sentenceUnits = clean
+    .split(/(?<=[.!?。！？])\s+|\n+/)
+    .map(v => v.trim())
+    .filter(Boolean);
+
+  const units = sentenceUnits.length > 0 ? sentenceUnits : [clean];
+  const cuts: string[] = [];
+  let current = '';
+
+  const splitLongUnit = (unit: string) => {
+    if (unit.length <= maxLen) return [unit];
+    const words = unit.split(/\s+/).filter(Boolean);
+    const out: string[] = [];
+    let chunk = '';
+    for (const w of words) {
+      if (!chunk) {
+        chunk = w;
+        continue;
+      }
+      const candidate = `${chunk} ${w}`;
+      if (candidate.length <= maxLen) {
+        chunk = candidate;
+      } else {
+        out.push(chunk);
+        chunk = w;
+      }
+    }
+    if (chunk) out.push(chunk);
+    return out.length > 0 ? out : [unit];
+  };
+
+  const pushCurrent = () => {
+    const normalized = current.replace(/\s+/g, ' ').trim();
+    if (normalized) cuts.push(normalized);
+    current = '';
+  };
+
+  for (const rawUnit of units) {
+    const expandedUnits = splitLongUnit(rawUnit);
+    for (const unit of expandedUnits) {
+    if (!current) {
+      current = unit;
+      if (current.length >= maxLen) {
+        pushCurrent();
+      }
+      continue;
+    }
+
+    const candidate = `${current} ${unit}`.replace(/\s+/g, ' ').trim();
+    if (candidate.length <= maxLen) {
+      current = candidate;
+      if (current.length >= target) {
+        pushCurrent();
+      }
+    } else {
+      if (current.length < minLen && unit.length < maxLen) {
+        const padded = `${current} ${unit}`.replace(/\s+/g, ' ').trim();
+        if (padded.length <= maxLen + Math.floor((maxLen - minLen) * 0.6)) {
+          current = padded;
+          pushCurrent();
+          continue;
+        }
+      }
+      pushCurrent();
+      current = unit;
+      if (current.length >= maxLen) pushCurrent();
+    }
+    }
+  }
+  pushCurrent();
+
+  return cuts.length > 0 ? cuts : [clean];
+};
+
 const drawSlideToCanvas = (
   ctx: CanvasRenderingContext2D,
   image: HTMLImageElement,
@@ -805,6 +915,17 @@ export default function App() {
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const abortRef = useRef<boolean>(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
+  const taskAbortRef = useRef({
+    hooks: false,
+    thumbnail: false,
+    description: false,
+    script: false,
+    tts: false,
+    prompts: false,
+    finalRender: false,
+    mp4: false,
+  });
+  const [autoImageBatchRunning, setAutoImageBatchRunning] = useState(false);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
 
   const [results, setResults] = useState<any[]>([]);
@@ -969,7 +1090,13 @@ export default function App() {
 
   // --- Gemini Logic ---
   const generateHooks = async () => {
+    if (ui.hookLoading) {
+      taskAbortRef.current.hooks = true;
+      setUi(prev => ({ ...prev, hookLoading: false }));
+      return;
+    }
     if (!keys.g1) return alert('Gemini API 키가 필요합니다.');
+    taskAbortRef.current.hooks = false;
     setUi(prev => ({ ...prev, hookLoading: true, selectedHookTitle: '' }));
     
     try {
@@ -988,6 +1115,7 @@ export default function App() {
       });
       
       const parsed = JSON.parse(response.text || '{}');
+      if (taskAbortRef.current.hooks) return;
       setUi(prev => ({ 
         ...prev, 
         hookTitles: parsed.hookTitles || [], 
@@ -1002,7 +1130,13 @@ export default function App() {
   };
 
   const generateThumbnail = async () => {
+    if (ui.thumbnail.generating) {
+      taskAbortRef.current.thumbnail = true;
+      setUi(prev => ({ ...prev, thumbnail: { ...prev.thumbnail, generating: false } }));
+      return;
+    }
     if (!keys.g1 || !ui.selectedHookTitle) return alert('제목을 선택하고 Gemini 키를 확인하세요.');
+    taskAbortRef.current.thumbnail = false;
     setUi(prev => ({ ...prev, thumbnail: { ...prev.thumbnail, generating: true } }));
 
     try {
@@ -1032,6 +1166,10 @@ ${stylePrompt}
 5. 절대 화면에 깨진 문자나 알 수 없는 기호가 나오지 않게 하세요.`
       });
       const visualPrompt = promptRes.text?.trim() || '';
+      if (taskAbortRef.current.thumbnail) {
+        setUi(prev => ({ ...prev, thumbnail: { ...prev.thumbnail, generating: false } }));
+        return;
+      }
 
       // 2. Generate Image
       const imageRes = await ai.models.generateContent({
@@ -1050,6 +1188,10 @@ ${stylePrompt}
         }
       }
 
+      if (taskAbortRef.current.thumbnail) {
+        setUi(prev => ({ ...prev, thumbnail: { ...prev.thumbnail, generating: false } }));
+        return;
+      }
       setUi(prev => ({ 
         ...prev, 
         thumbnail: { 
@@ -1067,7 +1209,13 @@ ${stylePrompt}
   };
 
   const generateDescription = async () => {
+    if (ui.description.generating) {
+      taskAbortRef.current.description = true;
+      setUi(prev => ({ ...prev, description: { ...prev.description, generating: false } }));
+      return;
+    }
     if (!keys.g1 || !ui.script.output) return alert('대본을 먼저 생성하세요.');
+    taskAbortRef.current.description = false;
     setUi(prev => ({ ...prev, description: { ...prev.description, generating: true } }));
 
     try {
@@ -1101,6 +1249,10 @@ JSON 형식으로만 출력하세요:
       });
       
       const parsed = JSON.parse(response.text || '{}');
+      if (taskAbortRef.current.description) {
+        setUi(prev => ({ ...prev, description: { ...prev.description, generating: false } }));
+        return;
+      }
       setUi(prev => ({ 
         ...prev, 
         description: { 
@@ -1119,7 +1271,13 @@ JSON 형식으로만 출력하세요:
   };
 
   const generateScript = async () => {
+    if (ui.script.generating) {
+      taskAbortRef.current.script = true;
+      setUi(prev => ({ ...prev, script: { ...prev.script, generating: false } }));
+      return;
+    }
     if (!keys.g1 || !ui.selectedHookTitle) return alert('제목을 선택하고 Gemini 키를 확인하세요.');
+    taskAbortRef.current.script = false;
     setUi(prev => ({ ...prev, script: { ...prev.script, generating: true } }));
 
     try {
@@ -1170,6 +1328,10 @@ ${ui.selectedHookTitle}
         contents: prompt
       });
       
+      if (taskAbortRef.current.script) {
+        setUi(prev => ({ ...prev, script: { ...prev.script, generating: false } }));
+        return;
+      }
       setUi(prev => ({ ...prev, script: { ...prev.script, output: response.text || '', generating: false } }));
     } catch (err) {
       console.error(err);
@@ -1335,7 +1497,13 @@ ${ui.selectedHookTitle}
   }, [ui.tts.selectedToneId, ui.script.output]);
 
   const handleGenerateTTS = async () => {
+    if (ui.tts.generating) {
+      taskAbortRef.current.tts = true;
+      setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, status: '중지됨' } }));
+      return;
+    }
     if (!keys.g1 || !ui.script.output) return alert('대본을 먼저 생성하세요.');
+    taskAbortRef.current.tts = false;
     setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: true, status: '생성 중...' } }));
 
     try {
@@ -1366,6 +1534,10 @@ ${ui.selectedHookTitle}
 
       const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
       if (base64Audio) {
+        if (taskAbortRef.current.tts) {
+          setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, status: '중지됨' } }));
+          return;
+        }
         const url = addWavHeader(base64Audio);
         setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, audioUrl: url, status: '완료' } }));
       }
@@ -1377,14 +1549,40 @@ ${ui.selectedHookTitle}
 
   const splitCuts = () => {
     if (!ui.script.output) return alert('대본이 없습니다.');
-    const lines = ui.script.output.split('\n').filter(l => l.trim().length > 5);
-    setUi(prev => ({ ...prev, cuts: { ...prev.cuts, items: lines } }));
+    const isShorts = ui.script.type === 'shorts';
+    const items = splitScriptToCuts(ui.script.output, isShorts)
+      .map(v => v.trim())
+      .filter(v => v.length > 1);
+
+    if (items.length === 0) {
+      alert('컷 분할 결과가 없습니다. 대본 내용을 확인해 주세요.');
+      return;
+    }
+
+    setUi(prev => ({ ...prev, cuts: { ...prev.cuts, items } }));
+  };
+
+  const handleDownloadThumbnail = () => {
+    if (!ui.thumbnail.url) return;
+    const ext = ui.thumbnail.url.startsWith('data:image/png') ? 'png' : 'jpg';
+    const titleSeed = (ui.selectedHookTitle || ui.filters.query || 'thumbnail').trim();
+    const safeTitle = Array.from(titleSeed).slice(0, 20).join('').replace(/[<>:"/\\|?*\x00-\x1F]/g, '').replace(/\s+/g, '_') || 'thumbnail';
+    const a = document.createElement('a');
+    a.href = ui.thumbnail.url;
+    a.download = `thumbnail_${safeTitle}.${ext}`;
+    a.click();
   };
 
   const generateImagePrompts = async () => {
+    if (ui.tts.status === '프롬프트 생성 중...') {
+      taskAbortRef.current.prompts = true;
+      setUi(prev => ({ ...prev, tts: { ...prev.tts, status: '프롬프트 생성 중지됨' } }));
+      return;
+    }
     if (ui.cuts.items.length === 0) return alert('컷 분할을 먼저 하세요.');
     if (!keys.g1) return alert('Gemini 키가 필요합니다.');
 
+    taskAbortRef.current.prompts = false;
     setUi(prev => ({ ...prev, tts: { ...prev.tts, status: '프롬프트 생성 중...' } }));
     
     try {
@@ -1393,6 +1591,7 @@ ${ui.selectedHookTitle}
       
       const prompts: any[] = [];
       for (let i = 0; i < ui.cuts.items.length; i++) {
+        if (taskAbortRef.current.prompts) break;
         const text = ui.cuts.items[i];
         const p = `당신은 시각적 연출가입니다. 다음 대본의 내용을 바탕으로, 이 특정 컷에 대한 상세한 영어 이미지 프롬프트를 작성하세요.
         
@@ -1421,11 +1620,15 @@ ${stylePrompt}
           console.error(`프롬프트 ${i + 1} 생성 실패:`, promptErr);
           prompts.push({ index: i + 1, prompt: '' });
         }
-        if (i < ui.cuts.items.length - 1) {
+        if (i < ui.cuts.items.length - 1 && !taskAbortRef.current.prompts) {
           await new Promise(r => setTimeout(r, 1000));
         }
       }
 
+      if (taskAbortRef.current.prompts) {
+        setUi(prev => ({ ...prev, tts: { ...prev.tts, status: '프롬프트 생성 중지됨' } }));
+        return;
+      }
       setUi(prev => ({ ...prev, cuts: { ...prev.cuts, prompts }, tts: { ...prev.tts, status: '' } }));
     } catch (err) {
       console.error(err);
@@ -1671,6 +1874,11 @@ ${stylePrompt}
   };
 
   const handleExportSlideVideo = async () => {
+    if (ui.finalVideo.generating) {
+      taskAbortRef.current.finalRender = true;
+      setUi(prev => ({ ...prev, finalVideo: { ...prev.finalVideo, generating: false } }));
+      return;
+    }
     const slides = ui.finalVideo.slides;
     if (slides.length === 0) {
       alert('먼저 [영상 생성] 버튼으로 슬라이드 구성을 완료하세요.');
@@ -1688,6 +1896,7 @@ ${stylePrompt}
       return;
     }
 
+    taskAbortRef.current.finalRender = false;
     setUi(prev => ({ ...prev, finalVideo: { ...prev.finalVideo, generating: true } }));
 
     let audioContext: AudioContext | null = null;
@@ -1782,6 +1991,10 @@ ${stylePrompt}
       const start = performance.now();
       await new Promise<void>(resolve => {
         const render = () => {
+          if (taskAbortRef.current.finalRender) {
+            resolve();
+            return;
+          }
           const elapsed = (performance.now() - start) / 1000;
           if (elapsed >= totalDuration) {
             const lastSlide = slides[slides.length - 1];
@@ -1842,6 +2055,10 @@ ${stylePrompt}
       });
 
       recorder.stop();
+      if (taskAbortRef.current.finalRender) {
+        setUi(prev => ({ ...prev, finalVideo: { ...prev.finalVideo, generating: false } }));
+        return;
+      }
       const renderedBlob = await finished;
       const renderedUrl = URL.createObjectURL(renderedBlob);
 
@@ -2243,11 +2460,17 @@ ${JSON.stringify(cutPayload)}`,
   };
 
   const handleConvertToMp4 = async () => {
+    if (ui.finalVideo.transcoding) {
+      taskAbortRef.current.mp4 = true;
+      setUi(prev => ({ ...prev, finalVideo: { ...prev.finalVideo, transcoding: false, ffmpegNote: '변환 중지 요청됨' } }));
+      return;
+    }
     if (!ui.finalVideo.url) {
       alert('먼저 슬라이드 렌더링을 완료하세요.');
       return;
     }
 
+    taskAbortRef.current.mp4 = false;
     setUi(prev => ({
       ...prev,
       finalVideo: { ...prev.finalVideo, transcoding: true, ffmpegNote: '변환 준비 중...' },
@@ -2255,6 +2478,7 @@ ${JSON.stringify(cutPayload)}`,
 
     try {
       const ffmpeg = await ensureFfmpegLoaded();
+      if (taskAbortRef.current.mp4) throw new Error('사용자에 의해 중지되었습니다.');
       const inputBlob = await fetch(ui.finalVideo.url).then(res => res.blob());
       await ffmpeg.writeFile('input.webm', await fetchFile(inputBlob));
 
@@ -2274,6 +2498,7 @@ ${JSON.stringify(cutPayload)}`,
           'output.mp4',
         ]);
       } catch {
+        if (taskAbortRef.current.mp4) throw new Error('사용자에 의해 중지되었습니다.');
         await ffmpeg.exec([
           '-i', 'input.webm',
           '-c:v', 'mpeg4',
@@ -2283,6 +2508,8 @@ ${JSON.stringify(cutPayload)}`,
           'output.mp4',
         ]);
       }
+
+      if (taskAbortRef.current.mp4) throw new Error('사용자에 의해 중지되었습니다.');
 
       const output = await ffmpeg.readFile('output.mp4');
       const data = output instanceof Uint8Array
@@ -2303,16 +2530,21 @@ ${JSON.stringify(cutPayload)}`,
       }));
       alert('MP4 변환이 완료되었습니다. 다운로드 버튼으로 저장하세요.');
     } catch (err: any) {
-      console.error(err);
+      const aborted = taskAbortRef.current.mp4;
+      if (!aborted) {
+        console.error(err);
+      }
       setUi(prev => ({
         ...prev,
         finalVideo: {
           ...prev.finalVideo,
           transcoding: false,
-          ffmpegNote: 'MP4 변환 실패',
+          ffmpegNote: aborted ? 'MP4 변환 중지됨' : 'MP4 변환 실패',
         },
       }));
-      alert(`MP4 변환 실패: ${err?.message || '알 수 없는 오류'}`);
+      if (!aborted) {
+        alert(`MP4 변환 실패: ${err?.message || '알 수 없는 오류'}`);
+      }
     }
   };
 
@@ -2490,7 +2722,7 @@ ${JSON.stringify(cutPayload)}`,
               <button 
                 onClick={handleSearch}
                 disabled={ui.searching}
-                className="w-full bg-gradient-to-r from-amber-500 to-yellow-400 text-black font-black py-4 rounded-2xl shadow-xl shadow-amber-500/20 active:scale-95 transition-all disabled:opacity-50"
+                className={`w-full text-black font-black py-4 rounded-2xl shadow-xl active:scale-95 transition-all disabled:opacity-50 ${ui.searching ? 'running-gradient' : 'bg-gradient-to-r from-amber-500 to-yellow-400 shadow-amber-500/20'}`}
               >
                 {ui.searching ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : '유튜브 검색 실행'}
               </button>
@@ -2556,10 +2788,10 @@ ${JSON.stringify(cutPayload)}`,
             <div className="space-y-8">
               <button 
                 onClick={generateHooks}
-                disabled={ui.hookLoading || results.length === 0}
-                className="w-full bg-orange-500 hover:bg-orange-600 text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50"
+                disabled={results.length === 0}
+                className={`w-full text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 ${ui.hookLoading ? 'running-gradient' : 'bg-orange-500 hover:bg-orange-600'}`}
               >
-                {ui.hookLoading ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : '바이럴 제목 30선 생성'}
+                {ui.hookLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-5 h-5 animate-spin" /> 중지</span> : '바이럴 제목 30선 생성'}
               </button>
               
               {ui.hookTitles.length > 0 && (
@@ -2694,10 +2926,10 @@ ${JSON.stringify(cutPayload)}`,
               <div className="flex gap-3">
                 <button 
                   onClick={generateScript}
-                  disabled={ui.script.generating || !ui.selectedHookTitle}
-                  className="flex-1 bg-amber-400 hover:bg-amber-500 text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  disabled={!ui.selectedHookTitle}
+                  className={`flex-1 text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${ui.script.generating ? 'running-gradient' : 'bg-amber-400 hover:bg-amber-500'}`}
                 >
-                  {ui.script.generating ? <Loader2 className="w-5 h-5 animate-spin" /> : '대본 생성'}
+                  {ui.script.generating ? <><Loader2 className="w-5 h-5 animate-spin" /> 중지</> : '대본 생성'}
                 </button>
                 <button 
                   onClick={() => copyToClipboard(ui.script.output)}
@@ -2841,10 +3073,10 @@ ${JSON.stringify(cutPayload)}`,
 
               <button 
                 onClick={generateThumbnail}
-                disabled={ui.thumbnail.generating || !ui.script.output}
-                className="w-full bg-pink-500 hover:bg-pink-600 text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50"
+                disabled={!ui.script.output}
+                className={`w-full text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 ${ui.thumbnail.generating ? 'running-gradient' : 'bg-pink-500 hover:bg-pink-600'}`}
               >
-                {ui.thumbnail.generating ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : '썸네일 생성'}
+                {ui.thumbnail.generating ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-5 h-5 animate-spin" /> 중지</span> : '썸네일 생성'}
               </button>
               {ui.thumbnail.url && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -2857,12 +3089,18 @@ ${JSON.stringify(cutPayload)}`,
                     }`}>
                       <img src={ui.thumbnail.url} className="w-full h-full object-cover" alt="Thumbnail" referrerPolicy="no-referrer" />
                       <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
-                        <button className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md transition-all">
+                        <button onClick={handleDownloadThumbnail} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md transition-all">
                           <Download className="w-6 h-6 text-white" />
                         </button>
                       </div>
                     </div>
                     <p className="text-[10px] text-slate-500 text-center font-bold uppercase tracking-widest">Thumbnail Preview</p>
+                    <button
+                      onClick={handleDownloadThumbnail}
+                      className="w-full bg-white/10 hover:bg-white/15 border border-white/15 rounded-xl py-2 text-xs font-black text-white transition-all"
+                    >
+                      썸네일 저장
+                    </button>
                   </div>
                   <div className="bg-pink-500/5 border border-pink-500/20 p-6 rounded-3xl">
                     <h5 className="text-[10px] font-black text-pink-400 uppercase mb-3 tracking-widest">Visual Prompt</h5>
@@ -2881,10 +3119,10 @@ ${JSON.stringify(cutPayload)}`,
             <div className="space-y-6">
               <button 
                 onClick={generateDescription}
-                disabled={ui.description.generating || !ui.script.output}
-                className="w-full bg-purple-500 hover:bg-purple-600 text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50"
+                disabled={!ui.script.output}
+                className={`w-full text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 ${ui.description.generating ? 'running-gradient' : 'bg-purple-500 hover:bg-purple-600'}`}
               >
-                {ui.description.generating ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : '설명란 생성'}
+                {ui.description.generating ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-5 h-5 animate-spin" /> 중지</span> : '설명란 생성'}
               </button>
               {(ui.description.kr.title || ui.description.en.title || ui.description.jp.title) && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -3008,10 +3246,10 @@ ${JSON.stringify(cutPayload)}`,
                 <div className="flex flex-col justify-end gap-3">
                   <button 
                     onClick={handleGenerateTTS}
-                    disabled={ui.tts.generating || !ui.script.output}
-                    className="w-full bg-cyan-500 hover:bg-cyan-600 text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                    disabled={!ui.script.output}
+                    className={`w-full text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${ui.tts.generating ? 'running-gradient' : 'bg-cyan-500 hover:bg-cyan-600'}`}
                   >
-                    {ui.tts.generating ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Volume2 className="w-5 h-5" /> TTS 생성</>}
+                    {ui.tts.generating ? <><Loader2 className="w-5 h-5 animate-spin" /> 중지</> : <><Volume2 className="w-5 h-5" /> TTS 생성</>}
                   </button>
                 </div>
               </div>
@@ -3072,9 +3310,9 @@ ${JSON.stringify(cutPayload)}`,
                 <button 
                   onClick={generateImagePrompts}
                   disabled={ui.cuts.items.length === 0}
-                  className="bg-cyan-500 hover:bg-cyan-600 text-black font-black px-6 py-2 rounded-xl transition-all disabled:opacity-50 text-xs"
+                  className={`text-black font-black px-6 py-2 rounded-xl transition-all disabled:opacity-50 text-xs ${ui.tts.status === '프롬프트 생성 중...' ? 'running-gradient' : 'bg-cyan-500 hover:bg-cyan-600'}`}
                 >
-                  프롬프트 생성
+                  {ui.tts.status === '프롬프트 생성 중...' ? '중지' : '프롬프트 생성'}
                 </button>
               </div>
 
@@ -3188,7 +3426,13 @@ ${JSON.stringify(cutPayload)}`,
 
                   <button 
                     onClick={async () => {
+                      if (autoImageBatchRunning) {
+                        abortRef.current = true;
+                        setAutoImageBatchRunning(false);
+                        return;
+                      }
                       abortRef.current = false;
+                      setAutoImageBatchRunning(true);
                       let failCount = 0;
                       for (const cut of ui.cuts.prompts) {
                         if (abortRef.current) { alert('이미지 생성이 중지되었습니다.'); break; }
@@ -3197,11 +3441,12 @@ ${JSON.stringify(cutPayload)}`,
                         } catch { failCount++; }
                         await new Promise(r => setTimeout(r, 2000));
                       }
+                      setAutoImageBatchRunning(false);
                       if (failCount > 0) alert(`${failCount}개의 이미지 생성에 실패했습니다.`);
                     }}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-black px-4 py-6 rounded-xl transition-all text-xs vertical-text flex items-center justify-center"
+                    className={`text-white font-black px-4 py-6 rounded-xl transition-all text-xs vertical-text flex items-center justify-center ${autoImageBatchRunning ? 'running-gradient' : 'bg-indigo-600 hover:bg-indigo-700'}`}
                   >
-                    전체 자동 생성
+                    {autoImageBatchRunning ? '중지' : '전체 자동 생성'}
                   </button>
 
                   <button 

@@ -505,7 +505,7 @@ export default function Panel12Section(props: Props) {
                 <button
                   onClick={handleGenerateFinalVideo}
                   disabled={ui.finalVideo.generating || ui.imageJobs.filter((j: any) => j.imageUrl).length === 0}
-                  className="bg-emerald-500 hover:bg-emerald-600 text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 text-xs"
+                  className={`text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 text-xs ${ui.finalVideo.generating ? 'running-gradient' : 'bg-emerald-500 hover:bg-emerald-600'}`}
                 >
                   {ui.finalVideo.generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Video className="w-4 h-4" /> {ui.finalVideo.type === 'image_slide' ? '슬라이드 구성' : '영상 생성'}</>}
                 </button>
@@ -533,6 +533,10 @@ export default function Panel12Section(props: Props) {
                 </label>
                 <button
                   onClick={async () => {
+                    if (ui.finalVideo.generating) {
+                      await handleExportSlideVideo();
+                      return;
+                    }
                     if (ui.finalVideo.type === 'image_slide') {
                       if (!ui.finalVideo.url) {
                         await handleExportSlideVideo();
@@ -550,10 +554,10 @@ export default function Panel12Section(props: Props) {
                     a.download = 'final_video.mp4';
                     a.click();
                   }}
-                  disabled={ui.finalVideo.generating || (ui.finalVideo.type === 'image_slide' && ui.finalVideo.slides.length === 0)}
-                  className="bg-blue-500 hover:bg-blue-600 text-white font-black py-4 rounded-2xl transition-all flex items-center justify-center gap-2 text-xs disabled:opacity-50"
+                  disabled={ui.finalVideo.type === 'image_slide' && ui.finalVideo.slides.length === 0}
+                  className={`font-black py-4 rounded-2xl transition-all flex items-center justify-center gap-2 text-xs disabled:opacity-50 ${ui.finalVideo.generating ? 'running-gradient text-black' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
                 >
-                  {ui.finalVideo.generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} {ui.finalVideo.type === 'image_slide' ? (ui.finalVideo.url ? '영상 다운로드' : '슬라이드 렌더링') : '다운로드'}
+                  {ui.finalVideo.generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} {ui.finalVideo.generating ? '렌더링 중지' : ui.finalVideo.type === 'image_slide' ? (ui.finalVideo.url ? '영상 다운로드' : '슬라이드 렌더링') : '다운로드'}
                 </button>
                 <button
                   onClick={() => setUi((prev: any) => ({
@@ -577,10 +581,11 @@ export default function Panel12Section(props: Props) {
                   </button>
                   <button
                     onClick={handleConvertToMp4}
-                    disabled={!ui.finalVideo.url || ui.finalVideo.generating || ui.finalVideo.transcoding}
-                    className="w-full bg-indigo-500/90 hover:bg-indigo-500 text-white font-black py-3 rounded-2xl transition-all text-xs disabled:opacity-40"
+                    disabled={!ui.finalVideo.url || ui.finalVideo.generating}
+                    title="권장 최소 사양: 8GB RAM, 4코어 CPU. 브라우저 탭 여유 메모리 2GB 이상 확보 후 실행하세요."
+                    className={`w-full font-black py-3 rounded-2xl transition-all text-xs disabled:opacity-40 ${ui.finalVideo.transcoding ? 'running-gradient text-black' : 'bg-indigo-500/90 hover:bg-indigo-500 text-white'}`}
                   >
-                    {ui.finalVideo.transcoding ? 'MP4 변환 중...' : 'FFmpeg MP4 변환'}
+                    {ui.finalVideo.transcoding ? '변환 중지' : 'FFmpeg MP4 변환'}
                   </button>
                 </div>
               )}
