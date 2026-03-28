@@ -797,6 +797,8 @@ export default function App() {
       ffmpegReady: false,
       ffmpegNote: '',
       outputFormat: 'webm' as 'webm' | 'mp4',
+      includeThumbnailIntro: false,
+      thumbnailIntroDuration: 1,
     }
   });
 
@@ -1701,6 +1703,9 @@ ${stylePrompt}
       }
 
       const images = await Promise.all(slides.map(slide => loadImageElement(slide.imageUrl)));
+      const introEnabled = ui.finalVideo.includeThumbnailIntro && Boolean(ui.thumbnail.url);
+      const introImage = introEnabled ? await loadImageElement(ui.thumbnail.url) : null;
+      const introDuration = introEnabled ? Math.max(0.5, Number(ui.finalVideo.thumbnailIntroDuration || 1)) : 0;
       const fps = 30;
       const stream = canvas.captureStream(fps);
 
@@ -1731,7 +1736,8 @@ ${stylePrompt}
 
       const slideDuration = Math.max(1, ui.finalVideo.slideDuration);
       const slideDurationTotal = slides.length * slideDuration;
-      const totalDuration = Math.max(slideDurationTotal, audioDuration || 0);
+      const totalDuration = Math.max(slideDurationTotal + introDuration, audioDuration || 0);
+      const subtitleTimelineDuration = Math.max(slideDurationTotal, Math.max(0, (audioDuration || 0) - introDuration));
       if (totalDuration <= 0) {
         throw new Error('렌더링 길이를 계산할 수 없습니다.');
       }
@@ -1739,11 +1745,15 @@ ${stylePrompt}
       const subtitleSegments = ui.finalVideo.subtitleEnabled
         ? buildSubtitleSegments(
             slides.map(slide => ui.cuts.items[slide.cut - 1] || ''),
-            totalDuration,
+            subtitleTimelineDuration,
             Math.max(12, ui.finalVideo.subtitleMaxChars),
           )
         : [];
-      drawSlideToCanvas(ctx, images[0], slides[0].motion, 0, width, height);
+      if (introImage) {
+        drawSlideToCanvas(ctx, introImage, 'zoom_in', 0, width, height);
+      } else {
+        drawSlideToCanvas(ctx, images[0], slides[0].motion, 0, width, height);
+      }
 
       const chunks: Blob[] = [];
       const recorder = new MediaRecorder(stream, {
@@ -1781,16 +1791,24 @@ ${stylePrompt}
             return;
           }
 
-          const slideIndex = Math.min(Math.floor(elapsed / slideDuration), slides.length - 1);
-          const slideProgress = Math.min(1, Math.max(0, (elapsed - slideIndex * slideDuration) / slideDuration));
+          if (introImage && elapsed < introDuration) {
+            drawSlideToCanvas(ctx, introImage, 'zoom_in', Math.min(1, elapsed / Math.max(0.01, introDuration)), width, height);
+            requestAnimationFrame(render);
+            return;
+          }
+
+          const timelineElapsed = Math.max(0, elapsed - introDuration);
+
+          const slideIndex = Math.min(Math.floor(timelineElapsed / slideDuration), slides.length - 1);
+          const slideProgress = Math.min(1, Math.max(0, (timelineElapsed - slideIndex * slideDuration) / slideDuration));
           drawSlideToCanvas(ctx, images[slideIndex], slides[slideIndex].motion, slideProgress, width, height);
 
           if (subtitleSegments.length > 0) {
-            const subtitle = subtitleSegments.find(s => elapsed >= s.start && elapsed < s.end);
+            const subtitle = subtitleSegments.find(s => timelineElapsed >= s.start && timelineElapsed < s.end);
             if (subtitle) {
               const words = subtitle.text.split(/\s+/).filter(Boolean);
               const segmentDuration = Math.max(0.001, subtitle.end - subtitle.start);
-              const segmentProgress = Math.min(0.999, Math.max(0, (elapsed - subtitle.start) / segmentDuration));
+              const segmentProgress = Math.min(0.999, Math.max(0, (timelineElapsed - subtitle.start) / segmentDuration));
               const highlightWord = ui.finalVideo.subtitleWordHighlight && words.length > 0
                 ? words[Math.min(words.length - 1, Math.floor(segmentProgress * words.length))]
                 : undefined;

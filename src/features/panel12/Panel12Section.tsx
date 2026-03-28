@@ -131,6 +131,33 @@ export default function Panel12Section(props: Props) {
                     </select>
                   </div>
                   <div className="flex items-center justify-between gap-3 pt-1">
+                    <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">첫 프레임 썸네일 고정</label>
+                    <button
+                      onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, includeThumbnailIntro: !prev.finalVideo.includeThumbnailIntro } }))}
+                      className={`px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.includeThumbnailIntro ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
+                    >
+                      {ui.finalVideo.includeThumbnailIntro ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                  {ui.finalVideo.includeThumbnailIntro && (
+                    <div className="flex items-center justify-between gap-3 pt-1">
+                      <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">고정 시간</label>
+                      <select
+                        value={String(ui.finalVideo.thumbnailIntroDuration)}
+                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, thumbnailIntroDuration: Number(e.target.value) } }))}
+                        className="bg-slate-800 border border-white/10 rounded-lg px-3 py-1.5 text-[10px] text-white outline-none"
+                      >
+                        <option value="0.5">0.5초</option>
+                        <option value="1">1.0초</option>
+                        <option value="1.5">1.5초</option>
+                        <option value="2">2.0초</option>
+                      </select>
+                    </div>
+                  )}
+                  {ui.finalVideo.includeThumbnailIntro && !ui.thumbnail?.url && (
+                    <p className="text-[10px] text-amber-300">썸네일이 아직 없습니다. 4번 패널에서 썸네일을 먼저 생성하면 첫 프레임 고정이 적용됩니다.</p>
+                  )}
+                  <div className="flex items-center justify-between gap-3 pt-1">
                     <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">자막</label>
                     <button
                       onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitleEnabled: !prev.finalVideo.subtitleEnabled } }))}
@@ -143,8 +170,8 @@ export default function Panel12Section(props: Props) {
                     <>
                       <div className="space-y-1 pt-1">
                         <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest block">자막 템플릿</label>
-                        <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-3">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-52 overflow-y-auto custom-scrollbar pr-1">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                          <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
                             {BUILTIN_SUBTITLE_TEMPLATES.map(template => {
                               const isActive = previewTemplate?.id === template.id;
                               return (
@@ -160,7 +187,7 @@ export default function Panel12Section(props: Props) {
                                     }}
                                     className="w-full text-left"
                                   >
-                                    <div className="aspect-[16/9] rounded-md overflow-hidden border border-white/10 bg-slate-900 relative">
+                                    <div className="aspect-[9/16] rounded-md overflow-hidden border border-white/10 bg-slate-900 relative">
                                       <img
                                         src={templatePreviewOverrides[template.id] || getBuiltinTemplatePreview(template)}
                                         alt={template.name}
@@ -208,7 +235,7 @@ export default function Panel12Section(props: Props) {
                           {previewTemplate && (
                             <div className="rounded-xl border border-emerald-400/30 bg-[#0c1628] p-3 space-y-2">
                               <p className="text-[10px] font-black text-emerald-200 uppercase tracking-widest">템플릿 확대 미리보기</p>
-                              <div className="w-full max-w-[220px] mx-auto rounded-lg overflow-hidden border border-white/15 bg-black" style={{ aspectRatio: '9 / 16' }}>
+                              <div className="w-full max-w-[280px] mx-auto rounded-lg overflow-hidden border border-white/15 bg-black" style={{ aspectRatio: '9 / 16' }}>
                                 <img
                                   src={templatePreviewOverrides[previewTemplate.id] || getBuiltinTemplatePreview(previewTemplate)}
                                   alt={`${previewTemplate.name}-preview`}
@@ -314,28 +341,24 @@ export default function Panel12Section(props: Props) {
                       <div className="flex items-center justify-between gap-3 pt-1">
                         <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">자막 정렬</label>
                         <select
-                          value={ui.finalVideo.subtitlePosition}
-                          onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitlePosition: e.target.value as any } }))}
+                          value={String(ui.finalVideo.subtitleGridPosition)}
+                          onChange={(e) => {
+                            const nextPos = Number(e.target.value);
+                            setUi((prev: any) => ({
+                              ...prev,
+                              finalVideo: {
+                                ...prev.finalVideo,
+                                subtitleGridPosition: nextPos,
+                                subtitlePosition: nextPos <= 5 ? 'middle' : 'bottom',
+                              },
+                            }));
+                          }}
                           className="bg-slate-800 border border-white/10 rounded-lg px-3 py-1.5 text-[10px] text-white outline-none"
                         >
-                          <option value="bottom">하단</option>
-                          <option value="middle">중앙</option>
+                          {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+                            <option key={n} value={n}>{n}/10</option>
+                          ))}
                         </select>
-                      </div>
-                      <div className="space-y-1 pt-1">
-                        <div className="flex items-center justify-between gap-3">
-                          <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">자막 위치 (10등분)</label>
-                          <span className="text-[10px] text-emerald-100 font-bold">{ui.finalVideo.subtitleGridPosition}/10</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="1"
-                          max="10"
-                          step="1"
-                          value={ui.finalVideo.subtitleGridPosition}
-                          onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitleGridPosition: Number(e.target.value) } }))}
-                          className="w-full accent-emerald-300"
-                        />
                       </div>
                       <div className="flex items-center justify-between gap-3 pt-1">
                         <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">자막 스타일</label>
