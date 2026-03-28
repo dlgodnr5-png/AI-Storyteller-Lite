@@ -1635,20 +1635,58 @@ ${stylePrompt}
     }
   };
 
+  const stripBlobRefs = (obj: any): { value: any; count: number } => {
+    let count = 0;
+    const walk = (value: any): any => {
+      if (typeof value === 'string' && value.startsWith('blob:')) {
+        count += 1;
+        return '';
+      }
+      if (Array.isArray(value)) {
+        return value.map(walk);
+      }
+      if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, walk(v)]));
+      }
+      return value;
+    };
+    return { value: walk(obj), count };
+  };
+
+  const applyLoadedProject = (parsed: any) => {
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('invalid-project');
+    }
+
+    const { value: sanitizedUi, count } = stripBlobRefs(parsed.ui || {});
+    setUi(sanitizedUi);
+    setResults(Array.isArray(parsed.results) ? parsed.results : []);
+
+    if (count > 0) {
+      alert(`프로젝트를 불러왔습니다. 만료된 임시 미디어 ${count}개(blob:)는 제외되었습니다. 필요하면 다시 생성해 주세요.`);
+      return;
+    }
+
+    alert('프로젝트를 성공적으로 불러왔습니다.');
+  };
+
   const saveProject = async () => {
     const safeTitleRaw = (ui.selectedHookTitle || ui.filters.query || 'project').trim();
     const tenChars = Array.from(safeTitleRaw).slice(0, 10).join('') || 'project';
     const safeTitle = tenChars.replace(/[<>:"/\\|?*\x00-\x1F]/g, '').replace(/\s+/g, '_');
     const folderRoot = `Ai-Storyteller-Lite/${safeTitle}`;
 
+    const { value: sanitizedUi, count: strippedBlobCount } = stripBlobRefs(ui);
+
     const projectPayload = {
       meta: {
         format: 'ai-storyteller-lite-project-v2',
-        requiresAssets: true,
-        note: 'JSON 단독 로드는 자산 누락 시 실패할 수 있습니다. 저장한 ZIP 전체를 보관하세요.',
+        requiresAssets: false,
+        strippedBlobCount,
+        note: '임시 blob URL은 저장 시 제외됩니다. 필요한 미디어는 다시 생성하거나 업로드하세요.',
         folderRoot,
       },
-      ui,
+      ui: sanitizedUi,
       results,
       timestamp: new Date().toISOString(),
     };
@@ -1665,7 +1703,11 @@ ${stylePrompt}
       a.download = `Ai-Storyteller-Lite_${safeTitle}.zip`;
       a.click();
       URL.revokeObjectURL(url);
-      alert(`프로젝트를 ZIP으로 저장했습니다. (폴더: ${folderRoot})`);
+      if (strippedBlobCount > 0) {
+        alert(`프로젝트를 ZIP으로 저장했습니다. (폴더: ${folderRoot})\n임시 미디어 ${strippedBlobCount}개(blob:)는 저장 대상에서 제외되었습니다.`);
+      } else {
+        alert(`프로젝트를 ZIP으로 저장했습니다. (폴더: ${folderRoot})`);
+      }
     } catch (err) {
       console.error(err);
       alert('프로젝트 ZIP 저장에 실패했습니다.');
@@ -1684,51 +1726,33 @@ ${stylePrompt}
     alert('새 프로젝트를 시작했습니다.');
   };
 
-  const collectBlobRefs = (obj: any): string[] => {
-    const refs: string[] = [];
-    const walk = (value: any) => {
-      if (typeof value === 'string' && value.startsWith('blob:')) {
-        refs.push(value);
-        return;
-      }
-      if (Array.isArray(value)) {
-        value.forEach(walk);
-        return;
-      }
-      if (value && typeof value === 'object') {
-        Object.values(value).forEach(walk);
-      }
-    };
-    walk(obj);
-    return refs;
-  };
-
-  const loadProject = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const loadProject = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const parsed = JSON.parse(event.target?.result as string);
-        if (parsed?.meta?.requiresAssets) {
-          alert('이 프로젝트 파일은 자산 번들(ZIP)을 전제로 저장되었습니다. JSON만 단독 불러오기는 지원하지 않습니다.');
+    try {
+      const isZip = file.name.toLowerCase().endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
+
+      if (isZip) {
+        const zip = await JSZip.loadAsync(await file.arrayBuffer());
+        const projectEntry = Object.values(zip.files).find(entry => !entry.dir && /(^|\/)project\.json$/i.test(entry.name));
+        if (!projectEntry) {
+          alert('ZIP 안에서 project.json을 찾지 못했습니다. 프로젝트 ZIP 파일이 맞는지 확인해 주세요.');
           return;
         }
 
-        const blobRefs = collectBlobRefs(parsed?.ui || {});
-        if (blobRefs.length > 0) {
-          alert('이 JSON은 blob 자산 참조를 포함해 단독으로 불러올 수 없습니다. 저장 당시 ZIP 전체 파일을 사용하세요.');
-          return;
-        }
-
-        if (parsed.ui) setUi(parsed.ui);
-        if (parsed.results) setResults(parsed.results);
-        alert('프로젝트를 성공적으로 불러왔습니다.');
-      } catch (err) {
-        alert('파일 형식이 올바르지 않습니다.');
+        const text = await projectEntry.async('string');
+        const parsed = JSON.parse(text);
+        applyLoadedProject(parsed);
+      } else {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        applyLoadedProject(parsed);
       }
-    };
-    reader.readAsText(file);
+    } catch (err) {
+      console.error(err);
+      alert('파일 형식이 올바르지 않거나 프로젝트를 읽는 중 오류가 발생했습니다.');
+    }
+
     e.currentTarget.value = '';
   };
 
@@ -2584,9 +2608,9 @@ ${JSON.stringify(cutPayload)}`,
           <label className="relative group flex items-center gap-2 bg-white/5 border border-white/10 px-5 py-2.5 rounded-full hover:bg-white/10 transition-all cursor-pointer">
             <Download className="w-4 h-4" />
             <span className="text-sm font-bold">불러오기</span>
-            <input type="file" accept=".json" onChange={loadProject} className="hidden" />
+            <input type="file" accept=".zip,.json,application/zip" onChange={loadProject} className="hidden" />
             <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-72 -translate-x-1/2 rounded-xl border border-amber-300/40 bg-[#10192f] p-3 text-[10px] text-amber-100 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
-              JSON 파일은 저장 당시 필요한 자산이 모두 있어야 정상 복원됩니다. 자산이 없으면 불러오기에 실패할 수 있습니다. ZIP 전체 보관을 권장합니다.
+              ZIP 또는 JSON 프로젝트를 불러올 수 있습니다. ZIP은 내부 project.json을 자동 탐색합니다.
             </div>
           </label>
           <button 
