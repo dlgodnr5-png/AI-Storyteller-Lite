@@ -28,6 +28,8 @@ type Props = {
   SLIDE_MOTIONS: Array<{ id: string; label: string }>;
   SLIDE_MOTION_ANIMATION: Record<string, { initial: any; animate: any }>;
   PRESET_SAMPLE_TEXT: Record<string, string>;
+  BGM_LIBRARY: Array<{ label: string; path: string }>;
+  SFX_LIBRARY: Array<{ label: string; path: string }>;
   ratioToCss: (ratio: string) => string;
   gridPositionToPercent: (n: number) => number;
   getBuiltinTemplatePreview: (template: any) => string;
@@ -60,6 +62,8 @@ export default function Panel12Section(props: Props) {
     SLIDE_MOTIONS,
     SLIDE_MOTION_ANIMATION,
     PRESET_SAMPLE_TEXT,
+    BGM_LIBRARY,
+    SFX_LIBRARY,
     ratioToCss,
     gridPositionToPercent,
     getBuiltinTemplatePreview,
@@ -156,6 +160,85 @@ export default function Panel12Section(props: Props) {
                   )}
                   {ui.finalVideo.includeThumbnailIntro && !ui.thumbnail?.url && (
                     <p className="text-[10px] text-amber-300">썸네일이 아직 없습니다. 4번 패널에서 썸네일을 먼저 생성하면 첫 프레임 고정이 적용됩니다.</p>
+                  )}
+                  <div className="flex items-center justify-between gap-3 pt-1">
+                    <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">배경음원(BGM)</label>
+                    <button
+                      onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, bgmEnabled: !prev.finalVideo.bgmEnabled } }))}
+                      className={`px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.bgmEnabled ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
+                    >
+                      {ui.finalVideo.bgmEnabled ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                  {ui.finalVideo.bgmEnabled && (
+                    <>
+                      <select
+                        value={ui.finalVideo.bgmTrack}
+                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, bgmTrack: e.target.value } }))}
+                        className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
+                      >
+                        {BGM_LIBRARY.map(track => (
+                          <option key={track.path} value={track.path}>{track.label}</option>
+                        ))}
+                      </select>
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">BGM 볼륨</label>
+                        <span className="text-[10px] text-emerald-100 font-bold">{ui.finalVideo.bgmVolume}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={ui.finalVideo.bgmVolume}
+                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, bgmVolume: Number(e.target.value) } }))}
+                        className="w-full accent-emerald-300"
+                      />
+                    </>
+                  )}
+                  <div className="flex items-center justify-between gap-3 pt-1">
+                    <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">전환 효과음(SFX)</label>
+                    <button
+                      onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxEnabled: !prev.finalVideo.sfxEnabled } }))}
+                      className={`px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.sfxEnabled ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
+                    >
+                      {ui.finalVideo.sfxEnabled ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                  {ui.finalVideo.sfxEnabled && (
+                    <>
+                      <select
+                        value={ui.finalVideo.sfxTrack}
+                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxTrack: e.target.value } }))}
+                        className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
+                      >
+                        {SFX_LIBRARY.map(track => (
+                          <option key={track.path} value={track.path}>{track.label}</option>
+                        ))}
+                      </select>
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">SFX 볼륨</label>
+                        <span className="text-[10px] text-emerald-100 font-bold">{ui.finalVideo.sfxVolume}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={ui.finalVideo.sfxVolume}
+                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxVolume: Number(e.target.value) } }))}
+                        className="w-full accent-emerald-300"
+                      />
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">컷 전환마다 삽입</label>
+                        <button
+                          onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxEveryCut: !prev.finalVideo.sfxEveryCut } }))}
+                          className={`px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.sfxEveryCut ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
+                        >
+                          {ui.finalVideo.sfxEveryCut ? 'ON' : '1회'}
+                        </button>
+                      </div>
+                    </>
                   )}
                   <div className="flex items-center justify-between gap-3 pt-1">
                     <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">자막</label>

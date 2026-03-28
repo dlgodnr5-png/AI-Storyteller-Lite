@@ -88,6 +88,54 @@ const VOICE_SAMPLE_PATHS: Record<string, string> = {
   Zubenelgenubi: '/audio/zubenelgenubi.wav',
 };
 
+const BGM_LIBRARY: Array<{ label: string; path: string }> = [
+  { label: 'Heart Sutra · Buddhism', path: '/audio/bgm/Heart Sutra_Buddhism.MP3' },
+  { label: 'Sunday Rollerskate · Product sales', path: '/audio/bgm/Sunday Rollerskate_Product sales.mp3' },
+  { label: 'Verified Update (침착뉴스)', path: '/audio/bgm/Verified Update(침착뉴스).wav' },
+  { label: 'Breaking Signal-1 (클래식뉴스)', path: '/audio/bgm/Breaking Signal-1(클래식뉴스).wav' },
+  { label: 'Flash Wire (속보)', path: '/audio/bgm/Flash Wire(속보).wav' },
+  { label: 'Breaking Signal (뉴스메인 2분)', path: '/audio/bgm/Breaking Signal_뉴스메인(2분).wav' },
+  { label: 'Candy Switch · 미래 EDM', path: '/audio/bgm/Candy Switch_미래EDM.wav' },
+  { label: 'Jump! Blink! · 코믹', path: '/audio/bgm/Jump! Blink!_코믹.wav' },
+  { label: 'Coffee Steam And City Rain · 빠른뉴스', path: '/audio/bgm/Coffee steam and city rain_빠른뉴스.wav' },
+  { label: 'Sparkling Morning · travel', path: '/audio/bgm/Sparkling Morning_travel.wav' },
+  { label: 'Rainbow Steps · comic', path: '/audio/bgm/Rainbow Steps_comic.mp3' },
+  { label: 'Cloud Train Go! · animal', path: '/audio/bgm/Cloud Train Go!_animal.mp3' },
+  { label: 'Twinkle Playground · Mystery', path: '/audio/bgm/Twinkle Playground_Mystery.mp3' },
+  { label: 'Hide & Seek In The Woods · travel', path: '/audio/bgm/Hide & Seek in the Woods_travel.mp3' },
+  { label: 'Starry Nap · Emotional', path: '/audio/bgm/Starry Nap_Emotional.mp3' },
+  { label: 'Morning Of Reason · crisp', path: '/audio/bgm/Morning of Reason_crisp.mp3' },
+  { label: 'Grey Balance · quiet', path: '/audio/bgm/Grey Balance_quiet.mp3' },
+  { label: 'Margin For Thought · Mystery', path: '/audio/bgm/Margin for Thought _Mystery.mp3' },
+  { label: 'Lamplight Low · Romance', path: '/audio/bgm/Lamplight Low_Romance.mp3' },
+  { label: 'Tide Of Thought · Documentary', path: '/audio/bgm/Tide of Thought_Documentary.mp3' },
+  { label: 'Cotton Candy Sky · Emotional', path: '/audio/bgm/Cotton Candy Sky_Emotional.mp3' },
+  { label: 'Tropical Steps · Product sales', path: '/audio/bgm/Tropical Steps_Product sales.mp3' },
+  { label: 'Sunday Roller · nervous', path: '/audio/bgm/Sunday Roller_nervous.mp3' },
+  { label: 'Sunbath · psychology', path: '/audio/bgm/Sunbath_psychology.mp3' },
+  { label: 'Dawn Tea · meditation', path: '/audio/bgm/Dawn Tea_meditation.mp3' },
+];
+
+const SFX_LIBRARY: Array<{ label: string; path: string }> = [
+  { label: '효과음 · 쿵', path: '/audio/sound effects/효과음/쿵.mp3' },
+  { label: '효과음 · 펑', path: '/audio/sound effects/효과음/펑.mp3' },
+  { label: '효과음 · 샤르르', path: '/audio/sound effects/효과음/샤르르.mp3' },
+  { label: '효과음 · 스르르', path: '/audio/sound effects/효과음/스르르.mp3' },
+  { label: '효과음 · 다음장면', path: '/audio/sound effects/효과음/다음장면.mp3' },
+  { label: '효과음 · 시작끝', path: '/audio/sound effects/효과음/시작끝.mp3' },
+  { label: '효과음 · 비프음(뚜~)', path: '/audio/sound effects/효과음/비프음(뚜~).mp3' },
+  { label: '효과음 · 심작박동', path: '/audio/sound effects/효과음/심작박동.mp3' },
+  { label: '긴장 · 1-1 긴장', path: '/audio/sound effects/긴장/1-1 긴장.mp3' },
+  { label: '긴장 · 1-4 긴장 중-강', path: '/audio/sound effects/긴장/1-4 긴장 중-강.mp3' },
+  { label: '긴장 · 5-4 공포 중-강', path: '/audio/sound effects/긴장/5-4  공포-중-강.mp3' },
+  { label: '비상사이렌 · 응급차', path: '/audio/sound effects/비상사이렌/응급차.mp3' },
+  { label: '비상사이렌 · 경찰사이렌', path: '/audio/sound effects/비상사이렌/경찰사이렌.mp3' },
+  { label: '단체웃음 · 01', path: '/audio/sound effects/단체웃음/01.mp3' },
+  { label: '총소리 · 기관총 연사 1', path: '/audio/sound effects/총소리/기관총 연사 1.mp3' },
+  { label: '전화기 · 전화전자식', path: '/audio/sound effects/전화기/전화전자식.mp3' },
+  { label: '황당할때 · 띠웅~', path: '/audio/sound effects/황당할때/띠웅~.mp3' },
+];
+
 const TONE_STYLES = [
   { id: "default", label: "없음 (AI 추천 기본값)", desc: "AI가 주제와 대본에 맞춰 최적의 스타일을 설정합니다." },
   { id: "01", label: "01 이야기/구연", detail: "썰풀이, 일상 브이로그, 감성 에세이", tone: "친근하고 자연스러운 대화체" },
@@ -909,6 +957,13 @@ export default function App() {
       outputFormat: 'webm' as 'webm' | 'mp4',
       includeThumbnailIntro: false,
       thumbnailIntroDuration: 1,
+      bgmEnabled: true,
+      bgmTrack: BGM_LIBRARY[0]?.path || '',
+      bgmVolume: 22,
+      sfxEnabled: false,
+      sfxTrack: SFX_LIBRARY[0]?.path || '',
+      sfxVolume: 45,
+      sfxEveryCut: true,
     }
   });
 
@@ -1657,9 +1712,21 @@ ${stylePrompt}
     if (!parsed || typeof parsed !== 'object') {
       throw new Error('invalid-project');
     }
+    if (!parsed.ui || typeof parsed.ui !== 'object') {
+      throw new Error('invalid-project-ui');
+    }
 
-    const { value: sanitizedUi, count } = stripBlobRefs(parsed.ui || {});
-    setUi(sanitizedUi);
+    const { value: sanitizedUi, count } = stripBlobRefs(parsed.ui);
+    const baseUi = initialUiRef.current ? JSON.parse(JSON.stringify(initialUiRef.current)) : ui;
+    const mergedUi = {
+      ...baseUi,
+      ...sanitizedUi,
+      finalVideo: {
+        ...baseUi.finalVideo,
+        ...(sanitizedUi.finalVideo || {}),
+      },
+    };
+    setUi(mergedUi);
     setResults(Array.isArray(parsed.results) ? parsed.results : []);
 
     if (count > 0) {
@@ -1668,6 +1735,30 @@ ${stylePrompt}
     }
 
     alert('프로젝트를 성공적으로 불러왔습니다.');
+  };
+
+  const parseProjectFromZip = async (zip: JSZip) => {
+    const allFiles = Object.values(zip.files).filter(entry => !entry.dir);
+    const preferred = allFiles.find(entry => /(^|[\\/])project\.json$/i.test(entry.name));
+    if (preferred) {
+      const text = await preferred.async('string');
+      return JSON.parse(text);
+    }
+
+    const jsonFiles = allFiles.filter(entry => /\.json$/i.test(entry.name));
+    for (const entry of jsonFiles) {
+      try {
+        const text = await entry.async('string');
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed === 'object' && parsed.ui && typeof parsed.ui === 'object') {
+          return parsed;
+        }
+      } catch {
+        // continue searching other json entries
+      }
+    }
+
+    throw new Error('zip-project-json-not-found');
   };
 
   const saveProject = async () => {
@@ -1730,24 +1821,26 @@ ${stylePrompt}
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const isZip = file.name.toLowerCase().endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer.slice(0, 4));
+      const hasZipSignature = bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b;
+      const isZipByNameOrType = file.name.toLowerCase().endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
+      const shouldTryZip = hasZipSignature || isZipByNameOrType;
 
-      if (isZip) {
-        const zip = await JSZip.loadAsync(await file.arrayBuffer());
-        const projectEntry = Object.values(zip.files).find(entry => !entry.dir && /(^|\/)project\.json$/i.test(entry.name));
-        if (!projectEntry) {
-          alert('ZIP 안에서 project.json을 찾지 못했습니다. 프로젝트 ZIP 파일이 맞는지 확인해 주세요.');
+      if (shouldTryZip) {
+        try {
+          const zip = await JSZip.loadAsync(arrayBuffer);
+          const parsed = await parseProjectFromZip(zip);
+          applyLoadedProject(parsed);
           return;
+        } catch (zipErr) {
+          console.warn('ZIP parsing failed, trying plain JSON fallback.', zipErr);
         }
-
-        const text = await projectEntry.async('string');
-        const parsed = JSON.parse(text);
-        applyLoadedProject(parsed);
-      } else {
-        const text = await file.text();
-        const parsed = JSON.parse(text);
-        applyLoadedProject(parsed);
       }
+
+      const text = new TextDecoder('utf-8').decode(arrayBuffer);
+      const parsed = JSON.parse(text);
+      applyLoadedProject(parsed);
     } catch (err) {
       console.error(err);
       alert('파일 형식이 올바르지 않거나 프로젝트를 읽는 중 오류가 발생했습니다.');
@@ -1943,24 +2036,19 @@ ${stylePrompt}
       const stream = canvas.captureStream(fps);
 
       let audioDuration = 0;
-      let sourceNode: AudioBufferSourceNode | null = null;
+      let ttsSourceNode: AudioBufferSourceNode | null = null;
+      let bgmSourceNode: AudioBufferSourceNode | null = null;
       let destinationNode: MediaStreamAudioDestinationNode | null = null;
+      const sfxSourceNodes: AudioBufferSourceNode[] = [];
 
-      if (ui.tts.audioUrl) {
+      const shouldMixTts = Boolean(ui.tts.audioUrl);
+      const shouldMixBgm = Boolean(ui.finalVideo.bgmEnabled && ui.finalVideo.bgmTrack);
+      const shouldMixSfx = Boolean(ui.finalVideo.sfxEnabled && ui.finalVideo.sfxTrack);
+      const shouldMixAnyAudio = shouldMixTts || shouldMixBgm || shouldMixSfx;
+
+      if (shouldMixAnyAudio) {
         audioContext = new window.AudioContext();
-        const audioBufferData = await fetch(ui.tts.audioUrl).then(res => {
-          if (!res.ok) {
-            throw new Error('TTS 음원 로드 실패');
-          }
-          return res.arrayBuffer();
-        });
-        const decoded = await audioContext.decodeAudioData(audioBufferData.slice(0));
-        audioDuration = decoded.duration;
         destinationNode = audioContext.createMediaStreamDestination();
-        sourceNode = audioContext.createBufferSource();
-        sourceNode.buffer = decoded;
-        sourceNode.connect(destinationNode);
-
         const audioTrack = destinationNode.stream.getAudioTracks()[0];
         if (audioTrack) {
           stream.addTrack(audioTrack);
@@ -1969,7 +2057,81 @@ ${stylePrompt}
 
       const slideDuration = Math.max(1, ui.finalVideo.slideDuration);
       const slideDurationTotal = slides.length * slideDuration;
-      const totalDuration = Math.max(slideDurationTotal + introDuration, audioDuration || 0);
+      const baseVideoDuration = slideDurationTotal + introDuration;
+
+      if (audioContext && destinationNode) {
+        if (shouldMixTts) {
+          const audioBufferData = await fetch(ui.tts.audioUrl).then(res => {
+            if (!res.ok) {
+              throw new Error('TTS 음원 로드 실패');
+            }
+            return res.arrayBuffer();
+          });
+          const decoded = await audioContext.decodeAudioData(audioBufferData.slice(0));
+          audioDuration = decoded.duration;
+          ttsSourceNode = audioContext.createBufferSource();
+          ttsSourceNode.buffer = decoded;
+          const ttsGain = audioContext.createGain();
+          ttsGain.gain.value = 1;
+          ttsSourceNode.connect(ttsGain);
+          ttsGain.connect(destinationNode);
+        }
+
+        if (shouldMixBgm) {
+          const bgmBufferData = await fetch(encodeURI(ui.finalVideo.bgmTrack)).then(res => {
+            if (!res.ok) {
+              throw new Error('배경음원 로드 실패');
+            }
+            return res.arrayBuffer();
+          });
+          const decodedBgm = await audioContext.decodeAudioData(bgmBufferData.slice(0));
+          bgmSourceNode = audioContext.createBufferSource();
+          bgmSourceNode.buffer = decodedBgm;
+          bgmSourceNode.loop = true;
+          const bgmGain = audioContext.createGain();
+          bgmGain.gain.value = Math.min(1, Math.max(0, Number(ui.finalVideo.bgmVolume || 0) / 100));
+          bgmSourceNode.connect(bgmGain);
+          bgmGain.connect(destinationNode);
+        }
+
+        if (shouldMixSfx) {
+          const sfxBufferData = await fetch(encodeURI(ui.finalVideo.sfxTrack)).then(res => {
+            if (!res.ok) {
+              throw new Error('효과음 로드 실패');
+            }
+            return res.arrayBuffer();
+          });
+          const decodedSfx = await audioContext.decodeAudioData(sfxBufferData.slice(0));
+          const sfxGain = audioContext.createGain();
+          sfxGain.gain.value = Math.min(1, Math.max(0, Number(ui.finalVideo.sfxVolume || 0) / 100));
+          sfxGain.connect(destinationNode);
+
+          const triggerTimes: number[] = [];
+          if (ui.finalVideo.sfxEveryCut) {
+            for (let i = 1; i < slides.length; i++) {
+              triggerTimes.push(introDuration + i * slideDuration);
+            }
+          } else {
+            triggerTimes.push(introDuration);
+          }
+
+          for (const startTime of triggerTimes) {
+            if (startTime >= baseVideoDuration) continue;
+            const sfxSource = audioContext.createBufferSource();
+            sfxSource.buffer = decodedSfx;
+            sfxSource.connect(sfxGain);
+            sfxSourceNodes.push(sfxSource);
+          }
+
+          // Start times are scheduled after recorder starts.
+          sfxSourceNodes.forEach((node, idx) => {
+            const when = (ui.finalVideo.sfxEveryCut ? introDuration + (idx + 1) * slideDuration : introDuration);
+            node.start(Math.max(0, when));
+          });
+        }
+      }
+
+      const totalDuration = Math.max(baseVideoDuration, audioDuration || 0);
       const subtitleTimelineDuration = Math.max(slideDurationTotal, Math.max(0, (audioDuration || 0) - introDuration));
       if (totalDuration <= 0) {
         throw new Error('렌더링 길이를 계산할 수 없습니다.');
@@ -2005,11 +2167,12 @@ ${stylePrompt}
       });
 
       recorder.start(250);
-      if (audioContext && sourceNode) {
+      if (audioContext) {
         if (audioContext.state === 'suspended') {
           await audioContext.resume();
         }
-        sourceNode.start(0);
+        ttsSourceNode?.start(0);
+        bgmSourceNode?.start(0);
       }
 
       const start = performance.now();
@@ -3612,6 +3775,8 @@ ${JSON.stringify(cutPayload)}`,
           SLIDE_MOTIONS={SLIDE_MOTIONS}
           SLIDE_MOTION_ANIMATION={SLIDE_MOTION_ANIMATION}
           PRESET_SAMPLE_TEXT={PRESET_SAMPLE_TEXT}
+          BGM_LIBRARY={BGM_LIBRARY}
+          SFX_LIBRARY={SFX_LIBRARY}
           ratioToCss={ratioToCss}
           gridPositionToPercent={gridPositionToPercent}
           getBuiltinTemplatePreview={getBuiltinTemplatePreview}
