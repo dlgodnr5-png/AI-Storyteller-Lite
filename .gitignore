@@ -1,7 +1,4 @@
-# Antigravity artifacts
-.gemini/
-brain/
-
-# Local OS files
-Thumb.db
-.DS_Store
+node_modules
+dist
+.env
+.env.*

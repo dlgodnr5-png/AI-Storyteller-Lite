@@ -1,0 +1,5 @@
+export enum LS_KEYS {
+  YT = "APP_YT_KEY",
+  GEMINI = "APP_GEMINI_KEY",
+  ELEVEN = "APP_ELEVEN_KEY",
+}
