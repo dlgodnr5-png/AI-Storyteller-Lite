@@ -313,6 +313,7 @@ type YouTubeAuthSession = {
   channelTitle: string;
   channelHandle: string;
   email: string;
+  authMode?: 'login' | 'youtube';
   channelId?: string;
   uploadsPlaylistId?: string;
 };
@@ -466,6 +467,7 @@ const SUBTITLE_TEMPLATE_PREVIEW_LS_KEY = 'ai_storyteller_subtitle_template_previ
 const PUBLISH_AUTOSAVE_LS_KEY = 'ai_storyteller_publish_draft_v1';
 const YT_OAUTH_STATE_LS_KEY = 'ai_storyteller_yt_oauth_state_v1';
 const YT_AUTH_SESSION_LS_KEY = 'ai_storyteller_yt_auth_session_v1';
+const YT_OAUTH_MODE_LS_KEY = 'ai_storyteller_yt_oauth_mode_v1';
 const PUBLISH_RETRY_SCHEDULE_MS = [0, 10 * 60 * 1000, 60 * 60 * 1000];
 
 const SOCIAL_PLATFORM_META: Array<{ id: PublishPlatform; label: string; color: string; available: boolean }> = [
@@ -1763,7 +1765,7 @@ export default function App() {
             account.platform === 'youtube'
               ? {
                   ...account,
-                  connected: true,
+                  connected: parsed.authMode === 'youtube' && Boolean(parsed.channelId),
                   name: parsed.channelTitle || account.name,
                   handle: parsed.channelHandle || account.handle,
                   email: parsed.email || account.email || '',
@@ -1797,7 +1799,9 @@ export default function App() {
       }
 
       const storedState = localStorage.getItem(YT_OAUTH_STATE_LS_KEY) || '';
+      const oauthMode = (localStorage.getItem(YT_OAUTH_MODE_LS_KEY) || 'youtube') as 'login' | 'youtube';
       localStorage.removeItem(YT_OAUTH_STATE_LS_KEY);
+      localStorage.removeItem(YT_OAUTH_MODE_LS_KEY);
       if (!accessToken || !state || state !== storedState) {
         alert('OAuth 상태 검증에 실패했습니다. 다시 시도해 주세요.');
         window.history.replaceState({}, '', '/');
@@ -1811,25 +1815,32 @@ export default function App() {
         const userInfo = userInfoRes.ok ? await userInfoRes.json() : {};
         const userEmail = normalizeEmail(String(userInfo?.email || ''));
 
-        const res = await fetch('https://www.googleapis.com/youtube/v3/channels?part=id,snippet,contentDetails,statistics&mine=true', {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        if (!res.ok) {
-          throw new Error(`채널 조회 실패 (${res.status})`);
+        let channelTitle = 'Google 사용자';
+        let channelHandle = '@google-user';
+        let channelId = '';
+        let uploadsPlaylistId = '';
+        if (oauthMode === 'youtube') {
+          const res = await fetch('https://www.googleapis.com/youtube/v3/channels?part=id,snippet,contentDetails,statistics&mine=true', {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          if (!res.ok) {
+            throw new Error(`채널 조회 실패 (${res.status})`);
+          }
+          const data = await res.json();
+          const channelItem = data?.items?.[0] || {};
+          const channel = channelItem?.snippet || {};
+          channelTitle = channel?.title || 'YouTube 채널';
+          channelHandle = channel?.customUrl ? `@${channel.customUrl.replace(/^@/, '')}` : '@connected-channel';
+          channelId = String(channelItem?.id || '');
+          uploadsPlaylistId = String(channelItem?.contentDetails?.relatedPlaylists?.uploads || '');
         }
-        const data = await res.json();
-        const channelItem = data?.items?.[0] || {};
-        const channel = channelItem?.snippet || {};
-        const channelTitle = channel?.title || 'YouTube 채널';
-        const channelHandle = channel?.customUrl ? `@${channel.customUrl.replace(/^@/, '')}` : '@connected-channel';
-        const channelId = String(channelItem?.id || '');
-        const uploadsPlaylistId = String(channelItem?.contentDetails?.relatedPlaylists?.uploads || '');
         const session: YouTubeAuthSession = {
           accessToken,
           expiresAt: Date.now() + Math.max(60, expiresIn - 30) * 1000,
           channelTitle,
           channelHandle,
           email: userEmail,
+          authMode: oauthMode,
           channelId,
           uploadsPlaylistId,
         };
@@ -1846,7 +1857,7 @@ export default function App() {
               account.platform === 'youtube'
                 ? {
                     ...account,
-                    connected: true,
+                    connected: oauthMode === 'youtube',
                     name: channelTitle,
                     handle: channelHandle,
                     email: userEmail,
@@ -1858,7 +1869,7 @@ export default function App() {
             ),
           },
         }));
-        alert('YouTube 계정 연결이 완료되었습니다.');
+        alert(oauthMode === 'youtube' ? 'YouTube 계정 연결이 완료되었습니다.' : 'Google 로그인이 완료되었습니다.');
       } catch (err: any) {
         console.error(err);
         alert(`YouTube 채널 정보 확인에 실패했습니다: ${err?.message || '알 수 없는 오류'}`);
@@ -3325,7 +3336,11 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
     delete publishRetryTimersRef.current[jobId];
   };
 
-  const connectYouTubeAccount = () => {
+  const connectYouTubeAccount = (mode: 'login' | 'youtube' = 'youtube') => {
+    if (mode === 'youtube' && !isApprovedUser) {
+      alert('승인된 사용자만 YouTube 연동이 가능합니다. 먼저 Google 로그인 후 승인 요청을 보내주세요.');
+      return;
+    }
     if (!googleClientId) {
       alert('Google 로그인 설정 누락: VITE_GOOGLE_CLIENT_ID가 배포 환경에 설정되지 않았습니다. 관리자에게 설정을 요청해 주세요.');
       return;
@@ -3337,14 +3352,21 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
 
     const state = createOAuthState();
     localStorage.setItem(YT_OAUTH_STATE_LS_KEY, state);
+    localStorage.setItem(YT_OAUTH_MODE_LS_KEY, mode);
 
-    const scope = [
-      'https://www.googleapis.com/auth/youtube.upload',
-      'https://www.googleapis.com/auth/youtube.readonly',
-      'openid',
-      'email',
-      'profile',
-    ].join(' ');
+    const scope = mode === 'youtube'
+      ? [
+          'https://www.googleapis.com/auth/youtube.upload',
+          'https://www.googleapis.com/auth/youtube.readonly',
+          'openid',
+          'email',
+          'profile',
+        ].join(' ')
+      : [
+          'openid',
+          'email',
+          'profile',
+        ].join(' ');
 
     const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     authUrl.searchParams.set('client_id', googleClientId);
@@ -3360,6 +3382,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
 
   const disconnectYouTubeAccount = () => {
     localStorage.removeItem(YT_AUTH_SESSION_LS_KEY);
+    localStorage.removeItem(YT_OAUTH_MODE_LS_KEY);
     setYoutubeAuth(null);
     setUi(prev => ({
       ...prev,
@@ -5019,16 +5042,10 @@ ${JSON.stringify(cutPayload)}`,
               )}
               <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={connectYouTubeAccount}
+                  onClick={() => connectYouTubeAccount('login')}
                   className="px-4 py-2.5 rounded-xl bg-cyan-500 text-black font-black"
                 >
                   Google로 시작하기
-                </button>
-                <button
-                  onClick={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
-                  className="px-4 py-2.5 rounded-xl bg-white/10 border border-white/15 text-white font-black"
-                >
-                  API 설정 열기
                 </button>
                 {!googleLoginReady && (
                   <button
@@ -5039,6 +5056,7 @@ ${JSON.stringify(cutPayload)}`,
                   </button>
                 )}
               </div>
+              <p className="text-[11px] text-slate-300/90">일반 사용자는 API 키를 입력할 필요가 없습니다. 서비스 운영자가 관리자 설정에서만 관리합니다.</p>
               {!googleLoginReady && (
                 <p className="text-[11px] text-amber-100/90">읽기 전용은 화면 확인/편집만 허용하며 다운로드·유튜브 연동·발행은 승인 전까지 차단됩니다.</p>
               )}
@@ -5069,7 +5087,7 @@ ${JSON.stringify(cutPayload)}`,
               </button>
             ) : (
               <button
-                onClick={connectYouTubeAccount}
+                onClick={() => connectYouTubeAccount('login')}
                 className="text-[10px] px-2 py-1 rounded-md bg-cyan-500 text-black font-black"
               >
                 로그인
@@ -5105,13 +5123,15 @@ ${JSON.stringify(cutPayload)}`,
               ZIP 또는 JSON 프로젝트를 불러올 수 있습니다. ZIP은 내부 project.json을 자동 탐색합니다.
             </div>
           </label>
-          <button 
-            onClick={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
-            className="flex items-center gap-2 bg-white/5 border border-white/10 px-5 py-2.5 rounded-full hover:bg-white/10 transition-all"
-          >
-            <Settings className="w-4 h-4" />
-            <span className="text-sm font-bold">API 설정</span>
-          </button>
+          {isPublishAdmin && (
+            <button 
+              onClick={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
+              className="flex items-center gap-2 bg-white/5 border border-white/10 px-5 py-2.5 rounded-full hover:bg-white/10 transition-all"
+            >
+              <Settings className="w-4 h-4" />
+              <span className="text-sm font-bold">관리자 API 설정</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -6510,11 +6530,19 @@ ${JSON.stringify(cutPayload)}`,
                         </div>
                         <div className="flex flex-col gap-2">
                           <button
-                            onClick={connectYouTubeAccount}
+                            onClick={() => connectYouTubeAccount('login')}
                             className={`px-3 py-2 rounded-lg text-xs font-black transition-all ${ui.publishing.accounts[0]?.connected ? 'bg-emerald-400 text-black' : 'bg-red-500 text-white hover:bg-red-400'}`}
                           >
-                            {ui.publishing.accounts[0]?.connected ? '재연결' : '로그인/연결'}
+                            {hasValidYouTubeAuth ? 'Google 로그인됨' : 'Google 로그인'}
                           </button>
+                          {isApprovedUser && hasValidYouTubeAuth && !ui.publishing.accounts[0]?.connected && (
+                            <button
+                              onClick={() => connectYouTubeAccount('youtube')}
+                              className="px-3 py-2 rounded-lg text-xs font-black transition-all bg-emerald-500 text-black hover:bg-emerald-400"
+                            >
+                              YouTube 권한 연결
+                            </button>
+                          )}
                           {ui.publishing.accounts[0]?.connected && (
                             <button
                               onClick={disconnectYouTubeAccount}
