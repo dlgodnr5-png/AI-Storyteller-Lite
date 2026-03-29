@@ -541,6 +541,22 @@ const estimateLongformGuide = (text: string) => {
   };
 };
 
+const trimScriptToSeconds = (text: string, lang: 'KR' | 'EN' | 'JP', seconds: number) => {
+  const perSecond = SHORTS_LIMITS[lang].perSecond;
+  const maxUnits = Math.max(20, Math.floor(perSecond * seconds));
+  return trimScriptToUnitLimit(text, lang, maxUnits);
+};
+
+const compactCutsToMax = (items: string[], maxCount: number) => {
+  if (items.length <= maxCount) return items;
+  const groups: string[] = [];
+  const chunk = Math.ceil(items.length / maxCount);
+  for (let i = 0; i < items.length; i += chunk) {
+    groups.push(items.slice(i, i + chunk).join(' ').trim());
+  }
+  return groups.filter(Boolean).slice(0, maxCount);
+};
+
 const getRenderDimensions = (ratio: string, resolution: RenderResolution) => {
   const base = RATIO_DIMENSIONS[ratio] || RATIO_DIMENSIONS['9:16'];
   const preset = RESOLUTION_PRESETS.find(p => p.id === resolution) || RESOLUTION_PRESETS[1];
@@ -1306,6 +1322,13 @@ export default function App() {
       step: '',
       lastTitle: '',
       error: '',
+    },
+    productPromo: {
+      imageUrl: '',
+      running: false,
+      step: '',
+      error: '',
+      targetSeconds: 20,
     },
   });
 
@@ -2291,7 +2314,7 @@ ${ui.selectedHookTitle}
     return { aborted: abortRef.current, failCount };
   };
 
-  const runOneClickFromTitle = async (title: string) => {
+  const runOneClickFromTitle = async (title: string, opts?: { productMode?: boolean }) => {
     if (!title?.trim()) return;
     if (!keys.g1) {
       alert('Gemini API 키를 먼저 설정하세요.');
@@ -2336,12 +2359,36 @@ ${ui.selectedHookTitle}
 
     try {
       await new Promise(r => setTimeout(r, 0));
+      if (opts?.productMode) {
+        setUi(prev => ({
+          ...prev,
+          script: {
+            ...prev.script,
+            type: 'shorts',
+            length: '20초',
+            tone: '상품홍보, 후킹형',
+          },
+          finalVideo: {
+            ...prev.finalVideo,
+            type: 'image_slide',
+          },
+        }));
+        await new Promise(r => setTimeout(r, 0));
+      }
+
       await withRetries(
         '대본 생성',
         () => actionApiRef.current.generateScript(),
         () => Boolean(latestUiRef.current?.script?.output?.trim()),
         2,
       );
+
+      if (opts?.productMode) {
+        const lang = (['KR', 'EN', 'JP'].includes(latestUiRef.current?.script?.lang) ? latestUiRef.current?.script?.lang : 'KR') as 'KR' | 'EN' | 'JP';
+        const trimmed = trimScriptToSeconds(latestUiRef.current?.script?.output || '', lang, 20);
+        setUi(prev => ({ ...prev, script: { ...prev.script, output: trimmed } }));
+        await new Promise(r => setTimeout(r, 0));
+      }
 
       await actionApiRef.current.rewriteTemplateTitleFromHook();
 
@@ -2352,12 +2399,30 @@ ${ui.selectedHookTitle}
         2,
       );
 
+      if (opts?.productMode && Number(latestUiRef.current?.tts?.measuredDuration || 0) > 20) {
+        const lang = (['KR', 'EN', 'JP'].includes(latestUiRef.current?.script?.lang) ? latestUiRef.current?.script?.lang : 'KR') as 'KR' | 'EN' | 'JP';
+        const stricter = trimScriptToSeconds(latestUiRef.current?.script?.output || '', lang, 17);
+        setUi(prev => ({ ...prev, script: { ...prev.script, output: stricter } }));
+        await new Promise(r => setTimeout(r, 0));
+        await withRetries(
+          'TTS 재생성(20초 보정)',
+          () => actionApiRef.current.handleGenerateTTS(),
+          () => Boolean(latestUiRef.current?.tts?.audioUrl) && Number(latestUiRef.current?.tts?.measuredDuration || 0) <= 20,
+          2,
+        );
+      }
+
       await withRetries(
         '컷 분할',
         () => actionApiRef.current.splitCuts(),
         () => (latestUiRef.current?.cuts?.items || []).length > 0,
         2,
       );
+
+      if (opts?.productMode) {
+        const compact = compactCutsToMax([...(latestUiRef.current?.cuts?.items || [])], 20);
+        setUi(prev => ({ ...prev, cuts: { ...prev.cuts, items: compact } }));
+      }
 
       await withRetries(
         '프롬프트 생성',
@@ -2386,7 +2451,15 @@ ${ui.selectedHookTitle}
       await withRetries(
         '렌더링',
         () => actionApiRef.current.handleExportSlideVideo(),
-        () => Boolean(latestUiRef.current?.finalVideo?.url),
+        () => {
+          if (!latestUiRef.current?.finalVideo?.url) return false;
+          if (!opts?.productMode) return true;
+          const cuts = latestUiRef.current?.cuts?.items || [];
+          const ttsSec = Number(latestUiRef.current?.tts?.measuredDuration || 0);
+          const slideSec = Math.max(1, Number(latestUiRef.current?.finalVideo?.slideDuration || 3));
+          const total = Math.max(ttsSec, cuts.length * slideSec);
+          return total <= 20.5;
+        },
         2,
       );
 
@@ -2444,6 +2517,101 @@ ${ui.selectedHookTitle}
   const selectHookTitle = (title: string) => {
     setUi(prev => ({ ...prev, selectedHookTitle: title }));
     void runOneClickFromTitle(title);
+  };
+
+  const fileToDataUrl = async (file: File) => {
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return `data:${file.type || 'image/jpeg'};base64,${btoa(binary)}`;
+  };
+
+  const handleProductPromoImage = async (file?: File | null) => {
+    if (!file) return;
+    const dataUrl = await fileToDataUrl(file);
+    setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, imageUrl: dataUrl } }));
+  };
+
+  const runProductPromoOneClick = async () => {
+    if (!keys.g1) return alert('Gemini API 키가 필요합니다.');
+    if (!ui.productPromo.imageUrl) return alert('상품 사진을 먼저 업로드해 주세요.');
+    if (latestUiRef.current?.productPromo?.running) return;
+
+    setUi(prev => ({
+      ...prev,
+      productPromo: {
+        ...prev.productPromo,
+        running: true,
+        step: '상품 분석 중',
+        error: '',
+      },
+    }));
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: keys.g1 });
+      const mimeMatch = ui.productPromo.imageUrl.match(/^data:(.*?);base64,/i);
+      const mimeType = mimeMatch?.[1] || 'image/jpeg';
+      const imageBase64 = ui.productPromo.imageUrl.split(',')[1] || '';
+      const analysis = await ai.models.generateContent({
+        model: 'gemini-2.5-pro',
+        contents: [
+          {
+            parts: [
+              { text: '이 상품 사진을 분석해 20초 이하 쇼츠 홍보용 후킹 제목을 만들어 주세요. JSON만 반환: {"hookTitle":"...","tone":"...","audience":"..."}' },
+              { inlineData: { mimeType, data: imageBase64 } },
+            ],
+          },
+        ],
+        config: { responseMimeType: 'application/json' },
+      });
+      const parsed = JSON.parse(analysis.text || '{}');
+      const hookTitle = normalizeSubtitleText(String(parsed?.hookTitle || '이 제품이 필요한 이유'));
+
+      setUi(prev => ({
+        ...prev,
+        selectedHookTitle: hookTitle,
+        script: {
+          ...prev.script,
+          type: 'shorts',
+          length: '20초',
+          tone: String(parsed?.tone || '상품홍보, 후킹형'),
+          targetAudience: String(parsed?.audience || prev.script.targetAudience),
+        },
+        productPromo: {
+          ...prev.productPromo,
+          step: '자동 제작 중',
+        },
+      }));
+
+      await runOneClickFromTitle(hookTitle, { productMode: true });
+
+      setUi(prev => ({
+        ...prev,
+        productPromo: {
+          ...prev.productPromo,
+          running: false,
+          step: '완료',
+          error: '',
+        },
+      }));
+    } catch (err: any) {
+      console.error(err);
+      setUi(prev => ({
+        ...prev,
+        productPromo: {
+          ...prev.productPromo,
+          running: false,
+          step: '오류',
+          error: '상품 자동 제작에 실패했습니다. 사진이나 네트워크 상태를 확인해 주세요.',
+        },
+      }));
+      alert('상품 자동 제작에 실패했습니다. 다시 시도해 주세요.');
+    }
   };
 
   const handleDownloadThumbnail = () => {
@@ -4146,6 +4314,46 @@ ${JSON.stringify(cutPayload)}`,
           </div>
         </section>
       )}
+
+      <section className="max-w-5xl mx-auto bg-white/5 border border-white/10 rounded-3xl p-4 md:p-5 backdrop-blur-xl">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-3">
+          <div>
+            <p className="text-xs font-black text-fuchsia-200 uppercase tracking-widest">사진 1장 상품홍보 자동 제작</p>
+            <p className="text-[11px] text-slate-400 mt-1">사진 업로드 후 버튼 한 번으로 20초 이하 영상(TTS+자막 싱크)을 자동 생성합니다.</p>
+          </div>
+          <button
+            onClick={runProductPromoOneClick}
+            disabled={!ui.productPromo.imageUrl || ui.productPromo.running || ui.autoFlow.running}
+            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all disabled:opacity-40 ${ui.productPromo.running ? 'running-gradient text-black' : 'bg-fuchsia-500 hover:bg-fuchsia-400 text-white'}`}
+          >
+            {ui.productPromo.running ? '자동 제작 중...' : '상품홍보 원클릭 실행'}
+          </button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-4">
+          <label className="rounded-2xl border border-dashed border-fuchsia-300/40 bg-fuchsia-500/5 p-3 cursor-pointer hover:bg-fuchsia-500/10 transition-all min-h-[160px] flex items-center justify-center">
+            {ui.productPromo.imageUrl ? (
+              <img src={ui.productPromo.imageUrl} alt="product" className="w-full h-full max-h-[160px] object-cover rounded-xl" />
+            ) : (
+              <span className="text-[11px] text-fuchsia-100/80 font-bold">상품 사진 업로드</span>
+            )}
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (e) => {
+                await handleProductPromoImage(e.target.files?.[0] || null);
+                e.currentTarget.value = '';
+              }}
+            />
+          </label>
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-2">
+            <p className="text-[11px] text-slate-300">목표 길이: <span className="font-black text-white">20초 이하</span></p>
+            <p className="text-[11px] text-slate-300">진행 단계: <span className="font-black text-emerald-300">{ui.productPromo.step || '대기'}</span></p>
+            {ui.productPromo.error && <p className="text-[11px] text-rose-300 font-bold">{ui.productPromo.error}</p>}
+            <p className="text-[10px] text-slate-500">완료 후 14번 패널에서 `지금 발행` 또는 `예약 발행`만 누르면 됩니다.</p>
+          </div>
+        </div>
+      </section>
 
       <main className="max-w-5xl mx-auto space-y-8">
         {/* 1. 유튜브 검색 */}
