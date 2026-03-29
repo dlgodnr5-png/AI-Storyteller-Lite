@@ -39,7 +39,7 @@ const GEMINI_TTS_VOICES = [
   { id: "Despina", label: "Despina · 여성 · 맑음/경쾌", gender: "여성", tags: ["맑음", "경쾌", "청량"] },
   { id: "Enceladus", label: "Enceladus · 남성 · 단호/명료", gender: "남성", tags: ["단호", "명료", "확신"] },
   { id: "Erinome", label: "Erinome · 여성 · 차분/중립", gender: "여성", tags: ["차분", "중립", "안정"] },
-  { id: "Gacrux", label: "Gacrux · 남성 · 따뜻/담백", gender: "남성", tags: ["따뜻", "담백", "친근"] },
+  { id: "Gacrux", label: "Gacrux · 여성 · 따뜻/담백", gender: "여성", tags: ["따뜻", "담백", "친근"] },
   { id: "Iapetus", label: "Iapetus · 남성 · 깊이/차분", gender: "남성", tags: ["깊이", "차분", "안정"] },
   { id: "Laomedeia", label: "Laomedeia · 여성 · 부드럽/정돈", gender: "여성", tags: ["부드럽", "정돈", "안정"] },
   { id: "Leda", label: "Leda · 여성 · 중저음/신뢰", gender: "여성", tags: ["중저음", "신뢰", "차분"] },
@@ -135,6 +135,33 @@ const SFX_LIBRARY: Array<{ label: string; path: string }> = [
   { label: '전화기 · 전화전자식', path: '/audio/sound effects/전화기/전화전자식.mp3' },
   { label: '황당할때 · 띠웅~', path: '/audio/sound effects/황당할때/띠웅~.mp3' },
 ];
+
+const BUDDHIST_BGM_PATH = '/audio/bgm/Heart Sutra_Buddhism.MP3';
+const BUDDHIST_TERMS = ['부처', '부처님', '나무관세음보살', '보살', '스님', '반야심경'];
+const DEFAULT_NON_RELIGIOUS_BGM = BGM_LIBRARY.find(track => track.path !== BUDDHIST_BGM_PATH)?.path || BGM_LIBRARY[0]?.path || '';
+const MM_TO_PX_1080 = 3.7795275591;
+
+const mmToPxScaled = (mm: number, width: number) => mm * MM_TO_PX_1080 * (width / 1080);
+
+const splitToFixedLines = (text: string, maxLineChars: number, maxLines: number) => {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  if (!compact) return [] as string[];
+  const chars = Array.from(compact);
+  const lines: string[] = [];
+  let cursor = 0;
+  while (cursor < chars.length && lines.length < maxLines) {
+    lines.push(chars.slice(cursor, cursor + maxLineChars).join('').trim());
+    cursor += maxLineChars;
+  }
+  return lines.filter(Boolean);
+};
+
+const normalizeHookTitleForOverlay = (text: string) => {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  const limited = Array.from(compact).slice(0, 20).join('');
+  const lines = splitToFixedLines(limited, 10, 2);
+  return lines.join('\n');
+};
 
 const SFX_RECOMMEND_RULES: Array<{ category: string; keywords: string[] }> = [
   { category: '긴장', keywords: ['긴장', '공포', '위기', '불안', '비밀', '충격', '살인', '미스터리'] },
@@ -264,6 +291,8 @@ type YouTubeAuthSession = {
   channelTitle: string;
   channelHandle: string;
   email: string;
+  channelId?: string;
+  uploadsPlaylistId?: string;
 };
 type SavedSubtitleTemplate = {
   name: string;
@@ -427,6 +456,81 @@ const SOCIAL_PLATFORM_META: Array<{ id: PublishPlatform; label: string; color: s
 
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
+const SHORTS_LIMITS = {
+  KR: { maxUnits: 580, unitsLabel: '자', perSecond: 8 },
+  EN: { maxUnits: 180, unitsLabel: '단어', perSecond: 2.5 },
+  JP: { maxUnits: 720, unitsLabel: '자', perSecond: 10 },
+} as const;
+
+const LONGFORM_GUIDE_TABLE = [
+  { minutes: 10, minChars: 3000, maxChars: 3500, cuts: 20 },
+  { minutes: 20, minChars: 6000, maxChars: 7000, cuts: 40 },
+  { minutes: 30, minChars: 9000, maxChars: 10500, cuts: 60 },
+  { minutes: 40, minChars: 12000, maxChars: 14000, cuts: 80 },
+  { minutes: 50, minChars: 15000, maxChars: 17500, cuts: 100 },
+  { minutes: 60, minChars: 18000, maxChars: 21000, cuts: 120 },
+];
+
+const isWhitespace = (ch: string) => /\s/.test(ch);
+
+const countScriptUnits = (text: string, lang: 'KR' | 'EN' | 'JP') => {
+  if (!text) return 0;
+  if (lang === 'EN') {
+    const words = text.match(/[A-Za-z0-9][A-Za-z0-9'_-]*/g);
+    return words ? words.length : 0;
+  }
+  return Array.from(text).filter(ch => !isWhitespace(ch)).length;
+};
+
+const trimScriptToUnitLimit = (text: string, lang: 'KR' | 'EN' | 'JP', maxUnits: number) => {
+  if (!text) return text;
+  if (lang === 'EN') {
+    const words = text.trim().split(/\s+/).filter(Boolean);
+    if (words.length <= maxUnits) return text.trim();
+    return `${words.slice(0, maxUnits).join(' ').replace(/[,.!?;:]+$/g, '')}.`;
+  }
+
+  let units = 0;
+  let out = '';
+  for (const ch of Array.from(text)) {
+    if (!isWhitespace(ch)) {
+      if (units >= maxUnits) break;
+      units += 1;
+    }
+    out += ch;
+  }
+  return out.trim();
+};
+
+const buildScriptMetrics = (text: string, lang: 'KR' | 'EN' | 'JP') => {
+  const conf = SHORTS_LIMITS[lang];
+  const units = countScriptUnits(text, lang);
+  const sec1x = units / conf.perSecond;
+  const sec125 = sec1x / 1.25;
+  return {
+    units,
+    unitsLabel: conf.unitsLabel,
+    sec1x,
+    sec125,
+    maxUnits: conf.maxUnits,
+    maxSec1x: 72,
+    maxSec125: 58,
+  };
+};
+
+const estimateLongformGuide = (text: string) => {
+  const chars = Array.from(text || '').filter(ch => !isWhitespace(ch)).length;
+  const match = LONGFORM_GUIDE_TABLE.find(row => chars >= row.minChars && chars <= row.maxChars)
+    || LONGFORM_GUIDE_TABLE.find(row => chars <= row.maxChars)
+    || LONGFORM_GUIDE_TABLE[LONGFORM_GUIDE_TABLE.length - 1];
+  return {
+    chars,
+    ...match,
+    introVideoCuts: 7,
+    introVideoSeconds: 30,
+  };
+};
+
 const getRenderDimensions = (ratio: string, resolution: RenderResolution) => {
   const base = RATIO_DIMENSIONS[ratio] || RATIO_DIMENSIONS['9:16'];
   const preset = RESOLUTION_PRESETS.find(p => p.id === resolution) || RESOLUTION_PRESETS[1];
@@ -477,6 +581,14 @@ const pickMediaRecorderMimeType = () => {
 const normalizeSubtitleText = (text: string) => text.replace(/\s+/g, ' ').trim();
 
 const splitSubtitleLines = (text: string, maxChars: number) => {
+  const manualLines = text
+    .split(/\r?\n/)
+    .map(line => normalizeSubtitleText(line))
+    .filter(Boolean);
+  if (manualLines.length >= 2) {
+    return manualLines.slice(0, 2);
+  }
+
   const clean = normalizeSubtitleText(text);
   if (!clean) return [''];
   const words = clean.split(' ');
@@ -499,6 +611,95 @@ const splitSubtitleLines = (text: string, maxChars: number) => {
 
   if (current) lines.push(current);
   return lines.slice(0, 2);
+};
+
+const drawTemplateTitleOverlay = (
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  text: string,
+  options: {
+    line1TopMm: number;
+    line2BottomMm: number;
+    fontFamily: string;
+    line1Color: string;
+    line2Color: string;
+    highlightColor: string;
+    strokeColor: string;
+    highlightWord: string;
+    scale: number;
+  },
+) => {
+  const rawLines = text
+    .split(/\r?\n/)
+    .map(v => normalizeSubtitleText(v))
+    .filter(Boolean);
+  const lines = rawLines.length > 0 ? rawLines.slice(0, 2) : splitToFixedLines(normalizeHookTitleForOverlay(text), 10, 2);
+  if (lines.length === 0) return;
+
+  const maxCharsPerLine = 10;
+  const clampedLines = lines.map(line => Array.from(line).slice(0, maxCharsPerLine).join(''));
+  const topPx = mmToPxScaled(options.line1TopMm || 20, width);
+  const bottomLimitPx = mmToPxScaled(options.line2BottomMm || 35, width);
+  const fontFamily = (options.fontFamily || 'Anemone').trim() || 'Anemone';
+  const basePt = 18 * (width / 1080);
+  let fontPx = Math.max(16, basePt * Math.max(0.75, Math.min(1.8, options.scale || 1)));
+  const highlightToken = cleanWordToken(options.highlightWord || '');
+
+  const measure = () => {
+    ctx.save();
+    ctx.font = `900 ${fontPx}px "${fontFamily}", "Pretendard", "Noto Sans KR", sans-serif`;
+    const sample = ctx.measureText('가Ag');
+    const ascent = sample.actualBoundingBoxAscent || fontPx * 0.8;
+    const descent = sample.actualBoundingBoxDescent || fontPx * 0.2;
+    const lineHeight = Math.max(fontPx * 1.1, ascent + descent + fontPx * 0.06);
+    ctx.restore();
+    return { ascent, descent, lineHeight };
+  };
+
+  let metrics = measure();
+  let secondBottom = topPx + metrics.ascent + (clampedLines.length > 1 ? metrics.lineHeight : 0) + metrics.descent;
+  while (secondBottom > bottomLimitPx && fontPx > 10) {
+    fontPx -= 0.6;
+    metrics = measure();
+    secondBottom = topPx + metrics.ascent + (clampedLines.length > 1 ? metrics.lineHeight : 0) + metrics.descent;
+  }
+
+  const drawStyledLine = (line: string, baselineY: number, fillColor: string) => {
+    const parts = line.split(/(\s+)/);
+    const widths = parts.map(part => ctx.measureText(part).width);
+    const totalWidth = widths.reduce((sum, w) => sum + w, 0);
+    let x = width / 2 - totalWidth / 2;
+    parts.forEach((part, idx) => {
+      if (!part) return;
+      const token = cleanWordToken(part);
+      const isHighlight = Boolean(highlightToken && token && token === highlightToken);
+      ctx.textAlign = 'left';
+      ctx.strokeStyle = options.strokeColor || '#000000';
+      ctx.fillStyle = isHighlight ? (options.highlightColor || '#fde047') : fillColor;
+      ctx.strokeText(part, x, baselineY);
+      ctx.fillText(part, x, baselineY);
+      x += widths[idx];
+    });
+    ctx.textAlign = 'center';
+  };
+
+  ctx.save();
+  ctx.font = `900 ${fontPx}px "${fontFamily}", "Pretendard", "Noto Sans KR", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = Math.max(2, Math.round(fontPx * 0.15));
+
+  const line1Baseline = topPx + metrics.ascent;
+  drawStyledLine(clampedLines[0], line1Baseline, options.line1Color || '#ef4444');
+  if (clampedLines[1]) {
+    const line2Baseline = line1Baseline + metrics.lineHeight;
+    drawStyledLine(clampedLines[1], line2Baseline, options.line2Color || '#111111');
+  }
+
+  ctx.restore();
 };
 
 const splitSubtitleUnits = (text: string) => {
@@ -748,6 +949,7 @@ const PRESET_SAMPLE_TEXT: Record<SubtitlePreset, string> = {
 };
 
 const BUILTIN_SUBTITLE_TEMPLATES: BuiltinSubtitleTemplate[] = [
+  { id: 'default-basic', name: '00 기본', description: '기본 레이아웃 템플릿', sample: '핵심만 빠르게 전달', previewImage: '/subtitle_templates/00 기본.jpg', config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleGridPosition: 9, subtitleMaxChars: 24, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '핵심,중요,요약', subtitleUsePerCutKeywords: false } },
   { id: 'promo-product', name: '상품광고', description: '강한 CTA, 빠른 강조, 전환 유도', sample: '지금 안 보면 손해! 오늘만 특가', previewImage: '/subtitle_templates/09. 상품.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleGridPosition: 9, subtitleMaxChars: 18, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_up', subtitleKeywords: '한정,특가,무료,지금,혜택', subtitleUsePerCutKeywords: false } },
   { id: 'news-urgent', name: '뉴스 브리핑', description: '신뢰감 있는 헤드라인형', sample: '속보: 핵심 내용 30초 요약', previewImage: '/subtitle_templates/07. MBC뉴스.png', config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 26, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'fade', subtitleKeywords: '속보,현장,단독,브리핑,핵심', subtitleUsePerCutKeywords: false } },
   { id: 'comedy-skit', name: '코믹 숏폼', description: '리액션 중심, 강한 단어 하이라이트', sample: '이 장면에서 다들 터졌습니다', previewImage: '/subtitle_templates/02. 일상쇼츠.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleGridPosition: 6, subtitleMaxChars: 20, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'pop', subtitleKeywords: '폭소,레전드,미친,반전,웃김', subtitleUsePerCutKeywords: true } },
@@ -976,6 +1178,7 @@ export default function App() {
     tts: {
       generating: false,
       audioUrl: '',
+      measuredDuration: 0,
       status: '',
       voice: 'Kore',
       model: 'gemini-2.5-flash-preview-tts',
@@ -986,6 +1189,7 @@ export default function App() {
       items: [] as string[],
       prompts: [] as any[],
       ratio: '9:16',
+      splitting: false,
     },
     imageJobs: [] as any[],
     videoJobs: [] as any[],
@@ -1010,6 +1214,20 @@ export default function App() {
       subtitleKeywordsByCut: {} as Record<number, string>,
       subtitleEntryAnimation: 'fade' as SubtitleEntryAnimation,
       subtitleSuggesting: false,
+      subtitleTemplateLockEnabled: false,
+      subtitleTemplateLockedId: '' as string,
+      templateTitleEnabled: true,
+      templateTitleText: '',
+      templateTitleFontFamily: '아네모네',
+      templateTitleLine1TopMm: 20,
+      templateTitleLine2BottomMm: 35,
+      templateTitleLine1Color: '#ef4444',
+      templateTitleLine2Color: '#111111',
+      templateTitleHighlightColor: '#fde047',
+      templateTitleHighlightWord: '',
+      templateTitleStrokeColor: 'rgba(0,0,0,0.92)',
+      templateTitleScale: 1,
+      templateTitleGenerating: false,
       transcoding: false,
       ffmpegReady: false,
       ffmpegNote: '',
@@ -1017,7 +1235,8 @@ export default function App() {
       includeThumbnailIntro: false,
       thumbnailIntroDuration: 1,
       bgmEnabled: true,
-      bgmTrack: BGM_LIBRARY[0]?.path || '',
+      bgmTrack: DEFAULT_NON_RELIGIOUS_BGM,
+      bgmTrackUserSelected: false,
       bgmVolume: 22,
       sfxEnabled: false,
       sfxTrack: SFX_LIBRARY[0]?.path || '',
@@ -1032,11 +1251,18 @@ export default function App() {
       mobileStep: 1,
       notifyEmail: '',
       accounts: [
-        { id: 'yt-main', platform: 'youtube' as PublishPlatform, name: 'YouTube 기본 채널', handle: '@your-channel', email: '', connected: false, lastSyncedAt: '' },
+        { id: 'yt-main', platform: 'youtube' as PublishPlatform, name: 'YouTube 기본 채널', handle: '@your-channel', email: '', channelId: '', uploadsPlaylistId: '', connected: false, lastSyncedAt: '' },
       ],
       ownerEmail: '',
       adminEmails: [] as string[],
       pendingAdminEmail: '',
+      channelInsights: {} as Record<string, {
+        channelTitle: string;
+        subscribers: string;
+        totalViews: string;
+        descriptionShort: string;
+        lastUploadDate: string;
+      }>,
       draft: {
         title: '',
         description: '',
@@ -1105,6 +1331,18 @@ export default function App() {
     return Array.from(new Set(list));
   }, [envAdminEmails, ui.publishing.adminEmails, ui.publishing.ownerEmail]);
   const isPublishAdmin = Boolean(currentUserEmail && effectiveAdminEmails.includes(currentUserEmail));
+  const scriptMetrics = useMemo(
+    () => buildScriptMetrics(ui.script.output || '', (['KR', 'EN', 'JP'].includes(ui.script.lang) ? ui.script.lang : 'KR') as 'KR' | 'EN' | 'JP'),
+    [ui.script.output, ui.script.lang],
+  );
+  const timingSummary = useMemo(() => {
+    const scriptSec = scriptMetrics.sec1x;
+    const ttsSec = Number(ui.tts.measuredDuration || 0);
+    const cutsSec = (ui.cuts.items?.length || 0) * Math.max(1, Number(ui.finalVideo.slideDuration || 3));
+    const effectiveSec = Math.max(cutsSec, ttsSec || scriptSec);
+    return { scriptSec, ttsSec, cutsSec, effectiveSec };
+  }, [scriptMetrics.sec1x, ui.tts.measuredDuration, ui.cuts.items, ui.finalVideo.slideDuration]);
+  const longformGuide = useMemo(() => estimateLongformGuide(ui.script.output || ''), [ui.script.output]);
 
   useEffect(() => {
     if (!initialUiRef.current) {
@@ -1188,6 +1426,7 @@ export default function App() {
           mobileStep: Number.isFinite(parsed.mobileStep) ? Math.min(5, Math.max(1, Number(parsed.mobileStep))) : prev.publishing.mobileStep,
           ownerEmail: typeof parsed.ownerEmail === 'string' ? parsed.ownerEmail : prev.publishing.ownerEmail,
           adminEmails: Array.isArray(parsed.adminEmails) ? parsed.adminEmails : prev.publishing.adminEmails,
+          channelInsights: parsed.channelInsights && typeof parsed.channelInsights === 'object' ? parsed.channelInsights : prev.publishing.channelInsights,
           draft: {
             ...prev.publishing.draft,
             ...(parsed.draft || {}),
@@ -1209,6 +1448,7 @@ export default function App() {
         mobileStep: ui.publishing.mobileStep,
         ownerEmail: ui.publishing.ownerEmail,
         adminEmails: ui.publishing.adminEmails,
+        channelInsights: ui.publishing.channelInsights,
         draft: ui.publishing.draft,
         jobs: ui.publishing.jobs,
         accounts: ui.publishing.accounts,
@@ -1240,6 +1480,8 @@ export default function App() {
                   name: parsed.channelTitle || account.name,
                   handle: parsed.channelHandle || account.handle,
                   email: parsed.email || account.email || '',
+                  channelId: parsed.channelId || account.channelId || '',
+                  uploadsPlaylistId: parsed.uploadsPlaylistId || account.uploadsPlaylistId || '',
                   lastSyncedAt: new Date().toISOString(),
                 }
               : account,
@@ -1282,22 +1524,27 @@ export default function App() {
         const userInfo = userInfoRes.ok ? await userInfoRes.json() : {};
         const userEmail = normalizeEmail(String(userInfo?.email || ''));
 
-        const res = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', {
+        const res = await fetch('https://www.googleapis.com/youtube/v3/channels?part=id,snippet,contentDetails,statistics&mine=true', {
           headers: { Authorization: `Bearer ${accessToken}` },
         });
         if (!res.ok) {
           throw new Error(`채널 조회 실패 (${res.status})`);
         }
         const data = await res.json();
-        const channel = data?.items?.[0]?.snippet || {};
+        const channelItem = data?.items?.[0] || {};
+        const channel = channelItem?.snippet || {};
         const channelTitle = channel?.title || 'YouTube 채널';
         const channelHandle = channel?.customUrl ? `@${channel.customUrl.replace(/^@/, '')}` : '@connected-channel';
+        const channelId = String(channelItem?.id || '');
+        const uploadsPlaylistId = String(channelItem?.contentDetails?.relatedPlaylists?.uploads || '');
         const session: YouTubeAuthSession = {
           accessToken,
           expiresAt: Date.now() + Math.max(60, expiresIn - 30) * 1000,
           channelTitle,
           channelHandle,
           email: userEmail,
+          channelId,
+          uploadsPlaylistId,
         };
 
         localStorage.setItem(YT_AUTH_SESSION_LS_KEY, JSON.stringify(session));
@@ -1316,6 +1563,8 @@ export default function App() {
                     name: channelTitle,
                     handle: channelHandle,
                     email: userEmail,
+                    channelId,
+                    uploadsPlaylistId,
                     lastSyncedAt: new Date().toISOString(),
                   }
                 : account,
@@ -1674,7 +1923,13 @@ ${ui.selectedHookTitle}
         setUi(prev => ({ ...prev, script: { ...prev.script, generating: false } }));
         return;
       }
-      setUi(prev => ({ ...prev, script: { ...prev.script, output: response.text || '', generating: false } }));
+      const rawScript = response.text || '';
+      const lang = (['KR', 'EN', 'JP'].includes(ui.script.lang) ? ui.script.lang : 'KR') as 'KR' | 'EN' | 'JP';
+      const shortsLimit = SHORTS_LIMITS[lang];
+      const finalScript = ui.script.type === 'shorts'
+        ? trimScriptToUnitLimit(rawScript, lang, shortsLimit.maxUnits)
+        : rawScript;
+      setUi(prev => ({ ...prev, script: { ...prev.script, output: finalScript, generating: false } }));
     } catch (err) {
       console.error(err);
       setUi(prev => ({ ...prev, script: { ...prev.script, generating: false } }));
@@ -1838,6 +2093,37 @@ ${ui.selectedHookTitle}
     }
   }, [ui.tts.selectedToneId, ui.script.output]);
 
+  useEffect(() => {
+    if (!ui.tts.audioUrl) {
+      setUi(prev => ({ ...prev, tts: { ...prev.tts, measuredDuration: 0 } }));
+      return;
+    }
+
+    let cancelled = false;
+    const probe = document.createElement('audio');
+    probe.preload = 'metadata';
+    probe.src = ui.tts.audioUrl;
+    const onLoaded = () => {
+      if (cancelled) return;
+      const duration = Number.isFinite(probe.duration) ? probe.duration : 0;
+      setUi(prev => ({ ...prev, tts: { ...prev.tts, measuredDuration: duration } }));
+    };
+    const onError = () => {
+      if (cancelled) return;
+      setUi(prev => ({ ...prev, tts: { ...prev.tts, measuredDuration: 0 } }));
+    };
+
+    probe.addEventListener('loadedmetadata', onLoaded);
+    probe.addEventListener('error', onError);
+
+    return () => {
+      cancelled = true;
+      probe.removeEventListener('loadedmetadata', onLoaded);
+      probe.removeEventListener('error', onError);
+      probe.src = '';
+    };
+  }, [ui.tts.audioUrl]);
+
   const handleGenerateTTS = async () => {
     if (ui.tts.generating) {
       taskAbortRef.current.tts = true;
@@ -1889,19 +2175,23 @@ ${ui.selectedHookTitle}
     }
   };
 
-  const splitCuts = () => {
+  const splitCuts = async () => {
+    if (ui.cuts.splitting) return;
     if (!ui.script.output) return alert('대본이 없습니다.');
+    setUi(prev => ({ ...prev, cuts: { ...prev.cuts, splitting: true } }));
+    await new Promise(resolve => setTimeout(resolve, 220));
     const isShorts = ui.script.type === 'shorts';
     const items = splitScriptToCuts(ui.script.output, isShorts)
       .map(v => v.trim())
       .filter(v => v.length > 1);
 
     if (items.length === 0) {
+      setUi(prev => ({ ...prev, cuts: { ...prev.cuts, splitting: false } }));
       alert('컷 분할 결과가 없습니다. 대본 내용을 확인해 주세요.');
       return;
     }
 
-    setUi(prev => ({ ...prev, cuts: { ...prev.cuts, items } }));
+    setUi(prev => ({ ...prev, cuts: { ...prev.cuts, items, splitting: false } }));
   };
 
   const handleDownloadThumbnail = () => {
@@ -2092,16 +2382,21 @@ ${stylePrompt}
     }
   };
 
-  const handleNewProject = () => {
-    const ok = window.confirm('새 프로젝트를 시작할까요? 현재 작업 내용은 저장하지 않으면 사라집니다.');
+  const handleNewProject = async () => {
+    const ok = window.confirm('새 프로젝트를 시작합니다. 현재 작업 자산을 먼저 자동 저장한 뒤 화면을 초기화합니다. 계속할까요?');
     if (!ok) return;
+    try {
+      await saveProject();
+    } catch {
+      // saveProject already handles alerts
+    }
     if (initialUiRef.current) {
       setUi(JSON.parse(JSON.stringify(initialUiRef.current)));
     }
     setResults([]);
     setPreviewingId(null);
     setPreviewLoading(false);
-    alert('새 프로젝트를 시작했습니다.');
+    alert('자동 저장 후 새 프로젝트로 초기화했습니다.');
   };
 
   const loadProject = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2153,11 +2448,11 @@ ${stylePrompt}
 
   const connectYouTubeAccount = () => {
     if (!googleClientId) {
-      alert('VITE_GOOGLE_CLIENT_ID가 설정되지 않았습니다. .env를 확인해 주세요.');
+      alert('YouTube 연결 준비 중입니다. 관리자 설정이 완료된 뒤 다시 시도해 주세요.');
       return;
     }
     if (!googleRedirectUri) {
-      alert('VITE_GOOGLE_REDIRECT_URI가 설정되지 않았습니다. .env를 확인해 주세요.');
+      alert('YouTube 연결 준비 중입니다. 관리자 설정이 완료된 뒤 다시 시도해 주세요.');
       return;
     }
 
@@ -2199,6 +2494,8 @@ ${stylePrompt}
                 name: 'YouTube 기본 채널',
                 handle: '@your-channel',
                 email: '',
+                channelId: '',
+                uploadsPlaylistId: '',
                 lastSyncedAt: '',
               }
             : account,
@@ -2252,6 +2549,124 @@ ${stylePrompt}
         adminEmails: prev.publishing.adminEmails.map(normalizeEmail).filter(item => item !== normalized),
       },
     }));
+  };
+
+  const rewriteTemplateTitleFromHook = async () => {
+    if (!ui.selectedHookTitle?.trim()) {
+      alert('먼저 바이럴 제목을 선택해 주세요.');
+      return;
+    }
+    if (!keys.g1) {
+      const fallback = normalizeHookTitleForOverlay(ui.selectedHookTitle);
+      setUi(prev => ({
+        ...prev,
+        finalVideo: {
+          ...prev.finalVideo,
+          templateTitleText: fallback,
+          templateTitleHighlightWord: splitToFixedLines(fallback, 10, 2)[0]?.split(/\s+/)[0] || '',
+        },
+      }));
+      alert('AI 키가 없어 선택한 제목을 규칙에 맞게만 정리했습니다.');
+      return;
+    }
+
+    setUi(prev => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleGenerating: true } }));
+    try {
+      const ai = new GoogleGenAI({ apiKey: keys.g1 });
+      const prompt = `다음 원본 제목을 쇼츠 훅 문장으로 재작성하세요.\n원본: ${ui.selectedHookTitle}\n\n규칙:\n1) 전체 최대 20자\n2) 최대 2줄, 각 줄 최대 10자\n3) 과장/낚시 금지, 강한 훅 유지\n4) 출력 JSON만: {"title":"...","highlight":"..."}`;
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-pro',
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+      const parsed = JSON.parse(response.text || '{}');
+      const normalized = normalizeHookTitleForOverlay(String(parsed?.title || ui.selectedHookTitle));
+      const firstLine = normalized.split(/\r?\n/)[0] || '';
+      const fallbackHighlight = firstLine.split(/\s+/).find(Boolean) || firstLine;
+      const highlight = normalizeSubtitleText(String(parsed?.highlight || fallbackHighlight));
+
+      setUi(prev => ({
+        ...prev,
+        finalVideo: {
+          ...prev.finalVideo,
+          templateTitleText: normalized,
+          templateTitleHighlightWord: Array.from(highlight).slice(0, 10).join(''),
+          templateTitleGenerating: false,
+        },
+      }));
+    } catch (err) {
+      console.error(err);
+      const fallback = normalizeHookTitleForOverlay(ui.selectedHookTitle);
+      setUi(prev => ({
+        ...prev,
+        finalVideo: {
+          ...prev.finalVideo,
+          templateTitleText: fallback,
+          templateTitleHighlightWord: splitToFixedLines(fallback, 10, 2)[0]?.split(/\s+/)[0] || '',
+          templateTitleGenerating: false,
+        },
+      }));
+      alert('제목 AI 재작성 중 오류가 있어 규칙 기반 제목으로 대체했습니다.');
+    }
+  };
+
+  const fetchChannelInsights = async (accountId: string) => {
+    const account = ui.publishing.accounts.find((a: any) => a.id === accountId && a.platform === 'youtube');
+    if (!account?.channelId) {
+      alert('채널 ID가 없습니다. YouTube 계정을 다시 연결해 주세요.');
+      return;
+    }
+    const apiKey = keys[activeKeys.yt as keyof typeof keys];
+    if (!apiKey) {
+      alert('YouTube API 키가 없어 채널 정보를 불러올 수 없습니다.');
+      return;
+    }
+
+    try {
+      const channelRes = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&id=${account.channelId}&key=${apiKey}`);
+      const channelData = await channelRes.json();
+      if (!channelRes.ok) {
+        throw new Error(channelData?.error?.message || '채널 정보 조회 실패');
+      }
+      const channel = channelData?.items?.[0] || {};
+      const uploadsPlaylistId = account.uploadsPlaylistId || channel?.contentDetails?.relatedPlaylists?.uploads || '';
+
+      let lastUploadDate = '';
+      if (uploadsPlaylistId) {
+        const uploadRes = await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=1&key=${apiKey}`);
+        const uploadData = await uploadRes.json();
+        if (uploadRes.ok) {
+          lastUploadDate = uploadData?.items?.[0]?.snippet?.publishedAt || '';
+        }
+      }
+
+      const snippet = channel?.snippet || {};
+      const stats = channel?.statistics || {};
+      const info = {
+        channelTitle: snippet?.title || account.name || '채널',
+        subscribers: Number(stats?.subscriberCount || 0).toLocaleString(),
+        totalViews: Number(stats?.viewCount || 0).toLocaleString(),
+        descriptionShort: Array.from(String(snippet?.description || '')).slice(0, 30).join(''),
+        lastUploadDate: lastUploadDate ? new Date(lastUploadDate).toLocaleDateString() : '정보 없음',
+      };
+
+      setUi((prev: any) => ({
+        ...prev,
+        publishing: {
+          ...prev.publishing,
+          channelInsights: {
+            ...prev.publishing.channelInsights,
+            [accountId]: info,
+          },
+          accounts: prev.publishing.accounts.map((a: any) =>
+            a.id === accountId ? { ...a, uploadsPlaylistId } : a,
+          ),
+        },
+      }));
+    } catch (err: any) {
+      console.error(err);
+      alert(`채널 속성 분석 실패: ${err?.message || '알 수 없는 오류'}`);
+    }
   };
 
   const sendPublishEmailNotification = (job: any) => {
@@ -2599,7 +3014,18 @@ ${stylePrompt}
       const sfxSourceNodes: AudioBufferSourceNode[] = [];
 
       const shouldMixTts = Boolean(ui.tts.audioUrl);
-      const shouldMixBgm = Boolean(ui.finalVideo.bgmEnabled && ui.finalVideo.bgmTrack);
+      const scriptSourceForReligion = `${ui.script.output || ''}\n${ui.cuts.items.join(' ')}`;
+      const hasBuddhistContext = BUDDHIST_TERMS.some(term => scriptSourceForReligion.includes(term));
+      const isBuddhistTrackSelected = ui.finalVideo.bgmTrack === BUDDHIST_BGM_PATH;
+      const shouldUseBuddhistTrack = hasBuddhistContext || (ui.finalVideo.bgmTrackUserSelected && isBuddhistTrackSelected);
+      const resolvedBgmTrack = ui.finalVideo.bgmEnabled
+        ? shouldUseBuddhistTrack
+          ? BUDDHIST_BGM_PATH
+          : isBuddhistTrackSelected
+            ? DEFAULT_NON_RELIGIOUS_BGM
+            : (ui.finalVideo.bgmTrack || DEFAULT_NON_RELIGIOUS_BGM)
+        : '';
+      const shouldMixBgm = Boolean(ui.finalVideo.bgmEnabled && resolvedBgmTrack);
       const shouldMixSfx = Boolean(ui.finalVideo.sfxEnabled && ui.finalVideo.sfxTrack);
       const shouldMixAnyAudio = shouldMixTts || shouldMixBgm || shouldMixSfx;
 
@@ -2644,7 +3070,7 @@ ${stylePrompt}
         }
 
         if (shouldMixBgm) {
-          const bgmBufferData = await fetch(encodeURI(ui.finalVideo.bgmTrack)).then(res => {
+          const bgmBufferData = await fetch(encodeURI(resolvedBgmTrack)).then(res => {
             if (!res.ok) {
               throw new Error('배경음원 로드 실패');
             }
@@ -2661,8 +3087,9 @@ ${stylePrompt}
           const bgmDuckedGain = bgmBaseGain * duckingFactor;
           bgmGain.gain.value = bgmBaseGain;
           if (shouldMixTts && ui.finalVideo.bgmDuckingEnabled) {
-            bgmGain.gain.setValueAtTime(bgmDuckedGain, 0);
-            bgmGain.gain.setValueAtTime(bgmBaseGain, Math.max(0, audioDuration + 0.04));
+            bgmGain.gain.setValueAtTime(bgmBaseGain, 0);
+            bgmGain.gain.setValueAtTime(bgmDuckedGain, introDuration);
+            bgmGain.gain.setValueAtTime(bgmBaseGain, Math.max(0, introDuration + audioDuration + 0.04));
           }
           bgmSourceNode.connect(bgmGain);
           bgmGain.connect(mixInputGain || destinationNode);
@@ -2703,8 +3130,9 @@ ${stylePrompt}
         }
       }
 
-      const totalDuration = Math.max(baseVideoDuration, audioDuration || 0);
-      const subtitleTimelineDuration = Math.max(slideDurationTotal, Math.max(0, (audioDuration || 0) - introDuration));
+      const narrationDuration = shouldMixTts ? Math.max(0, audioDuration) : slideDurationTotal;
+      const totalDuration = Math.max(baseVideoDuration, introDuration + narrationDuration);
+      const subtitleTimelineDuration = narrationDuration;
       if (totalDuration <= 0) {
         throw new Error('렌더링 길이를 계산할 수 없습니다.');
       }
@@ -2743,7 +3171,7 @@ ${stylePrompt}
         if (audioContext.state === 'suspended') {
           await audioContext.resume();
         }
-        ttsSourceNode?.start(0);
+        ttsSourceNode?.start(introDuration);
         bgmSourceNode?.start(0);
 
         if (sfxSchedule.length > 0) {
@@ -2790,6 +3218,26 @@ ${stylePrompt}
           const slideIndex = Math.min(Math.floor(timelineElapsed / slideDuration), slides.length - 1);
           const slideProgress = Math.min(1, Math.max(0, (timelineElapsed - slideIndex * slideDuration) / slideDuration));
           drawSlideToCanvas(ctx, images[slideIndex], slides[slideIndex].motion, slideProgress, width, height);
+
+          if (ui.finalVideo.templateTitleEnabled && ui.finalVideo.templateTitleText) {
+            drawTemplateTitleOverlay(
+              ctx,
+              width,
+              height,
+              ui.finalVideo.templateTitleText,
+              {
+                line1TopMm: ui.finalVideo.templateTitleLine1TopMm,
+                line2BottomMm: ui.finalVideo.templateTitleLine2BottomMm,
+                fontFamily: ui.finalVideo.templateTitleFontFamily,
+                line1Color: ui.finalVideo.templateTitleLine1Color,
+                line2Color: ui.finalVideo.templateTitleLine2Color,
+                highlightColor: ui.finalVideo.templateTitleHighlightColor,
+                strokeColor: ui.finalVideo.templateTitleStrokeColor,
+                highlightWord: ui.finalVideo.templateTitleHighlightWord,
+                scale: ui.finalVideo.templateTitleScale,
+              },
+            );
+          }
 
           if (subtitleSegments.length > 0) {
             const subtitle = subtitleSegments.find(s => timelineElapsed >= s.start && timelineElapsed < s.end);
@@ -2868,7 +3316,8 @@ ${stylePrompt}
 
     const slideDuration = Math.max(1, ui.finalVideo.slideDuration);
     const baseDuration = slides.length * slideDuration;
-    const estimatedTotal = Math.max(baseDuration, slides.length);
+    const narrationDuration = ui.tts.measuredDuration > 0 ? ui.tts.measuredDuration : baseDuration;
+    const estimatedTotal = Math.max(1, narrationDuration);
     const segments = buildSubtitleSegments(
       slides.map(slide => ui.cuts.items[slide.cut - 1] || ''),
       estimatedTotal,
@@ -2960,6 +3409,14 @@ ${stylePrompt}
   const applyBuiltinSubtitleTemplate = (templateId: string) => {
     const selected = BUILTIN_SUBTITLE_TEMPLATES.find(t => t.id === templateId);
     if (!selected) return;
+    const defaultTitleText = ui.selectedHookTitle ? normalizeHookTitleForOverlay(ui.selectedHookTitle) : '';
+    const defaultHighlightWord = normalizeSubtitleText(defaultTitleText.split(/\r?\n/)[0] || '').split(/\s+/).find(Boolean) || '';
+
+    if (ui.finalVideo.subtitleTemplateLockEnabled && ui.finalVideo.subtitleTemplateLockedId && ui.finalVideo.subtitleTemplateLockedId !== templateId) {
+      alert('템플릿이 고정되어 있습니다. 고정 해제 후 다른 템플릿을 선택하세요.');
+      return;
+    }
+
     setUi(prev => ({
       ...prev,
       finalVideo: {
@@ -2973,9 +3430,31 @@ ${stylePrompt}
         subtitleEntryAnimation: selected.config.subtitleEntryAnimation,
         subtitleKeywords: selected.config.subtitleKeywords,
         subtitleUsePerCutKeywords: selected.config.subtitleUsePerCutKeywords,
+        templateTitleEnabled: true,
+        templateTitleText: defaultTitleText,
+        templateTitleFontFamily: '아네모네',
+        templateTitleLine1TopMm: 20,
+        templateTitleLine2BottomMm: 35,
+        templateTitleLine1Color: '#ef4444',
+        templateTitleLine2Color: '#111111',
+        templateTitleHighlightColor: '#fde047',
+        templateTitleHighlightWord: defaultHighlightWord,
+        templateTitleStrokeColor: 'rgba(0,0,0,0.92)',
+        templateTitleScale: 1,
+        subtitleTemplateLockEnabled: true,
+        subtitleTemplateLockedId: templateId,
       },
     }));
   };
+
+  useEffect(() => {
+    if (!ui.finalVideo.subtitleTemplateLockedId) {
+      const hasDefaultTemplate = BUILTIN_SUBTITLE_TEMPLATES.some(t => t.id === 'default-basic');
+      if (hasDefaultTemplate) {
+        applyBuiltinSubtitleTemplate('default-basic');
+      }
+    }
+  }, [ui.finalVideo.subtitleTemplateLockedId]);
 
   const handleTemplatePreviewUpload = (templateId: string, file?: File | null) => {
     if (!file) return;
@@ -3045,6 +3524,7 @@ ${stylePrompt}
   const importSubtitleTemplates = async (file?: File | null) => {
     if (!file) return;
     try {
+      const filenameStem = (file.name || 'imported_template').replace(/\.[^/.]+$/, '').trim().slice(0, 36) || 'imported_template';
       const text = await file.text();
       const parsed = JSON.parse(text);
       const incoming = Array.isArray(parsed?.templates)
@@ -3055,8 +3535,8 @@ ${stylePrompt}
 
       const sanitized = incoming
         .filter((t: any) => t && typeof t.name === 'string')
-        .map((t: any) => ({
-          name: String(t.name).slice(0, 40),
+        .map((t: any, idx: number) => ({
+          name: `${filenameStem}${idx === 0 ? '' : `_${idx + 1}`}`.slice(0, 40),
           subtitlePreset: (['shorts', 'docu', 'lecture'].includes(t.subtitlePreset) ? t.subtitlePreset : 'shorts') as SubtitlePreset,
           subtitlePosition: (['bottom', 'middle'].includes(t.subtitlePosition) ? t.subtitlePosition : 'bottom') as SubtitlePosition,
           subtitleGridPosition: Number.isFinite(t.subtitleGridPosition) ? Math.min(10, Math.max(1, Number(t.subtitleGridPosition))) : 9,
@@ -3080,7 +3560,7 @@ ${stylePrompt}
         });
         return [...mergedMap.values()].slice(0, 20);
       });
-      alert(`${sanitized.length}개 템플릿을 가져왔습니다.`);
+      alert(`${sanitized.length}개 템플릿을 가져왔습니다. 파일명(${filenameStem}) 기준으로 저장되었습니다.`);
     } catch (err) {
       console.error(err);
       alert('템플릿 가져오기에 실패했습니다. JSON 파일을 확인해주세요.');
@@ -3373,6 +3853,36 @@ ${JSON.stringify(cutPayload)}`,
           </button>
         </div>
       </header>
+
+      {ui.publishing.accounts.filter((a: any) => a.connected).length > 0 && (
+        <section className="max-w-5xl mx-auto bg-white/5 border border-white/10 rounded-3xl p-4 md:p-5 backdrop-blur-xl">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <p className="text-xs font-black text-cyan-200 uppercase tracking-widest">연동된 YouTube 채널</p>
+            <span className="text-[10px] text-slate-400">카드를 클릭하면 채널 속성을 분석합니다.</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {ui.publishing.accounts.filter((a: any) => a.connected).map((account: any) => {
+              const insight = ui.publishing.channelInsights?.[account.id];
+              return (
+                <button
+                  key={account.id}
+                  onClick={() => fetchChannelInsights(account.id)}
+                  className="text-left rounded-2xl border border-cyan-300/20 bg-cyan-500/5 hover:bg-cyan-500/10 transition-all p-4"
+                >
+                  <p className="text-sm font-black text-white">{insight?.channelTitle || account.name}</p>
+                  <p className="text-[11px] text-cyan-100/90">{account.handle} · {account.email || '이메일 미확인'}</p>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-slate-300">
+                    <p>구독자: <span className="font-bold text-white">{insight?.subscribers || '-'}</span></p>
+                    <p>총조회수: <span className="font-bold text-white">{insight?.totalViews || '-'}</span></p>
+                    <p className="col-span-2">설명: <span className="font-bold text-white">{insight?.descriptionShort || '-'}</span></p>
+                    <p className="col-span-2">마지막 업로드: <span className="font-bold text-white">{insight?.lastUploadDate || '-'}</span></p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <main className="max-w-5xl mx-auto space-y-8">
         {/* 1. 유튜브 검색 */}
@@ -3719,18 +4229,28 @@ ${JSON.stringify(cutPayload)}`,
                 <div className="space-y-4">
                   <div className="flex gap-4">
                     <div className="flex-1 bg-black/40 border border-white/5 p-4 rounded-2xl flex flex-col items-center justify-center">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">글자 수</span>
-                      <span className="text-lg font-bold text-white">{ui.script.output.length}자</span>
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{ui.script.lang === 'EN' ? '단어 수' : '글자 수(공백 제외)'}</span>
+                      <span className="text-lg font-bold text-white">{scriptMetrics.units}{scriptMetrics.unitsLabel}</span>
                     </div>
                     <div className="flex-1 bg-black/40 border border-white/5 p-4 rounded-2xl flex flex-col items-center justify-center">
                       <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">예상 시간 (1.0x)</span>
-                      <span className="text-lg font-bold text-amber-400">{Math.ceil(ui.script.output.length / 3.5)}초</span>
+                      <span className="text-lg font-bold text-amber-400">{Math.ceil(scriptMetrics.sec1x)}초</span>
                     </div>
                     <div className="flex-1 bg-black/40 border border-white/5 p-4 rounded-2xl flex flex-col items-center justify-center">
                       <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">예상 시간 (1.25x)</span>
-                      <span className="text-lg font-bold text-cyan-400">{Math.ceil((ui.script.output.length / 3.5) / 1.25)}초</span>
+                      <span className="text-lg font-bold text-cyan-400">{Math.ceil(scriptMetrics.sec125)}초</span>
                     </div>
                   </div>
+                  {ui.script.type === 'shorts' && (scriptMetrics.sec1x > scriptMetrics.maxSec1x || scriptMetrics.sec125 > scriptMetrics.maxSec125) && (
+                    <p className="text-[11px] text-rose-300 font-bold">
+                      쇼츠 제한 초과: 1.0x {Math.ceil(scriptMetrics.sec1x)}초 / 1.25x {Math.ceil(scriptMetrics.sec125)}초. 목표는 1.0x 72초 이하, 1.25x 58초 이하입니다.
+                    </p>
+                  )}
+                  {ui.tts.measuredDuration > 0 && (
+                    <p className="text-[11px] text-emerald-300 font-bold">
+                      실측 TTS 길이: {ui.tts.measuredDuration.toFixed(1)}초 (예상 1.0x 대비 차이 {Math.abs(ui.tts.measuredDuration - scriptMetrics.sec1x).toFixed(1)}초)
+                    </p>
+                  )}
                   <div className="bg-black/40 border border-white/5 p-6 rounded-3xl relative group">
                     <div className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap max-h-[400px] overflow-y-auto custom-scrollbar">
                       <Markdown>{ui.script.output}</Markdown>
@@ -4077,19 +4597,44 @@ ${JSON.stringify(cutPayload)}`,
                 <button 
                   onClick={splitCuts}
                   disabled={!ui.script.output}
-                  className="bg-amber-500 hover:bg-amber-600 text-black font-black px-6 py-2 rounded-xl transition-all disabled:opacity-50 text-xs"
+                  className={`text-black font-black px-6 py-2 rounded-xl transition-all disabled:opacity-50 text-xs flex items-center justify-center gap-2 min-w-[120px] ${ui.cuts.splitting ? 'running-gradient' : 'bg-amber-500 hover:bg-amber-600'}`}
                 >
-                  컷 분할
+                  {ui.cuts.splitting ? <><Loader2 className="w-4 h-4 animate-spin" /> 분할 중...</> : '컷 분할'}
                 </button>
 
                 <button 
                   onClick={generateImagePrompts}
                   disabled={ui.cuts.items.length === 0}
-                  className={`text-black font-black px-6 py-2 rounded-xl transition-all disabled:opacity-50 text-xs ${ui.tts.status === '프롬프트 생성 중...' ? 'running-gradient' : 'bg-cyan-500 hover:bg-cyan-600'}`}
+                  className={`text-black font-black px-6 py-2 rounded-xl transition-all disabled:opacity-50 text-xs flex items-center justify-center gap-2 min-w-[140px] ${ui.tts.status === '프롬프트 생성 중...' ? 'running-gradient' : 'bg-cyan-500 hover:bg-cyan-600'}`}
                 >
-                  {ui.tts.status === '프롬프트 생성 중...' ? '중지' : '프롬프트 생성'}
+                  {ui.tts.status === '프롬프트 생성 중...' ? <><Loader2 className="w-4 h-4 animate-spin" /> 중지</> : '프롬프트 생성'}
                 </button>
               </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
+                <div className="bg-black/30 border border-white/10 rounded-xl px-3 py-2">
+                  <p className="text-slate-400">대본(1.0x)</p>
+                  <p className="text-amber-300 font-black">{Math.ceil(timingSummary.scriptSec)}초</p>
+                </div>
+                <div className="bg-black/30 border border-white/10 rounded-xl px-3 py-2">
+                  <p className="text-slate-400">TTS 실측</p>
+                  <p className="text-cyan-300 font-black">{timingSummary.ttsSec > 0 ? `${Math.ceil(timingSummary.ttsSec)}초` : '미생성'}</p>
+                </div>
+                <div className="bg-black/30 border border-white/10 rounded-xl px-3 py-2">
+                  <p className="text-slate-400">컷 길이</p>
+                  <p className="text-emerald-300 font-black">{Math.ceil(timingSummary.cutsSec)}초</p>
+                </div>
+                <div className="bg-black/30 border border-white/10 rounded-xl px-3 py-2">
+                  <p className="text-slate-400">최종 기준</p>
+                  <p className="text-white font-black">{Math.ceil(timingSummary.effectiveSec)}초</p>
+                </div>
+              </div>
+
+              {ui.script.type === 'long-form' && (
+                <div className="text-[10px] text-slate-300 bg-black/25 border border-white/10 rounded-xl px-3 py-2 leading-relaxed">
+                  롱폼 자동 지침: 공백 제외 {longformGuide.minChars.toLocaleString()}~{longformGuide.maxChars.toLocaleString()}자 권장 구간은 이미지 {longformGuide.cuts}장(30초당 1컷). 자동 제작 기본은 초반 7컷(약 30초+) 영상 슬롯, 이후 슬라이드 슬롯입니다.
+                </div>
+              )}
 
               <div className="space-y-4">
                 {ui.cuts.items.length === 0 ? (
@@ -4355,6 +4900,7 @@ ${JSON.stringify(cutPayload)}`,
           handleTemplatePreviewUpload={handleTemplatePreviewUpload}
           resetTemplatePreview={resetTemplatePreview}
           handleSuggestSubtitleKeywords={handleSuggestSubtitleKeywords}
+          rewriteTemplateTitleFromHook={rewriteTemplateTitleFromHook}
           subtitleTemplates={subtitleTemplates}
           templatePreviewOverrides={templatePreviewOverrides}
           BUILTIN_SUBTITLE_TEMPLATES={BUILTIN_SUBTITLE_TEMPLATES}

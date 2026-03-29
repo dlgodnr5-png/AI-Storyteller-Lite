@@ -20,6 +20,7 @@ type Props = {
   handleTemplatePreviewUpload: (templateId: string, file?: File | null) => void;
   resetTemplatePreview: (templateId: string) => void;
   handleSuggestSubtitleKeywords: () => Promise<void> | void;
+  rewriteTemplateTitleFromHook: () => Promise<void> | void;
   subtitleTemplates: any[];
   templatePreviewOverrides: Record<string, string>;
   BUILTIN_SUBTITLE_TEMPLATES: any[];
@@ -54,6 +55,7 @@ export default function Panel12Section(props: Props) {
     handleTemplatePreviewUpload,
     resetTemplatePreview,
     handleSuggestSubtitleKeywords,
+    rewriteTemplateTitleFromHook,
     subtitleTemplates,
     templatePreviewOverrides,
     BUILTIN_SUBTITLE_TEMPLATES,
@@ -174,7 +176,7 @@ export default function Panel12Section(props: Props) {
                     <>
                       <select
                         value={ui.finalVideo.bgmTrack}
-                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, bgmTrack: e.target.value } }))}
+                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, bgmTrack: e.target.value, bgmTrackUserSelected: true } }))}
                         className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
                       >
                         {BGM_LIBRARY.map(track => (
@@ -316,6 +318,9 @@ export default function Panel12Section(props: Props) {
                                     onClick={() => {
                                       setPreviewTemplateId(template.id);
                                       applyBuiltinSubtitleTemplate(template.id);
+                                      if (!ui.finalVideo.templateTitleText && ui.selectedHookTitle) {
+                                        rewriteTemplateTitleFromHook();
+                                      }
                                     }}
                                     className="w-full text-left flex-1"
                                   >
@@ -339,26 +344,6 @@ export default function Panel12Section(props: Props) {
                                     </p>
                                     <p className="text-[9px] text-slate-300 mt-1 line-clamp-2">{template.description}</p>
                                   </button>
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <label className="text-center text-[9px] font-black bg-black/40 border border-white/10 rounded-md py-1 cursor-pointer hover:bg-black/60">
-                                      이미지 선택
-                                      <input
-                                        type="file"
-                                        accept="image/*"
-                                        className="hidden"
-                                        onChange={(e) => {
-                                          handleTemplatePreviewUpload(template.id, e.target.files?.[0] || null);
-                                          e.currentTarget.value = '';
-                                        }}
-                                      />
-                                    </label>
-                                    <button
-                                      onClick={() => resetTemplatePreview(template.id)}
-                                      className="text-[9px] font-black bg-black/40 border border-white/10 rounded-md py-1 hover:bg-black/60"
-                                    >
-                                      이미지 초기화
-                                    </button>
-                                  </div>
                                 </div>
                               );
                             })}
@@ -385,42 +370,165 @@ export default function Panel12Section(props: Props) {
                               >
                                 이 템플릿 적용
                               </button>
+                              <button
+                                onClick={() => {
+                                  const nextLock = !(ui.finalVideo.subtitleTemplateLockEnabled && ui.finalVideo.subtitleTemplateLockedId === previewTemplate.id);
+                                  setUi((prev: any) => ({
+                                    ...prev,
+                                    finalVideo: {
+                                      ...prev.finalVideo,
+                                      subtitleTemplateLockEnabled: nextLock,
+                                      subtitleTemplateLockedId: nextLock ? previewTemplate.id : '',
+                                    },
+                                  }));
+                                  if (nextLock) {
+                                    applyBuiltinSubtitleTemplate(previewTemplate.id);
+                                  }
+                                }}
+                                className={`w-full text-[10px] font-black py-2 rounded-lg border transition-all ${ui.finalVideo.subtitleTemplateLockEnabled && ui.finalVideo.subtitleTemplateLockedId === previewTemplate.id ? 'bg-amber-400 text-black border-amber-300' : 'bg-slate-800 text-slate-100 border-white/10 hover:bg-slate-700'}`}
+                              >
+                                {ui.finalVideo.subtitleTemplateLockEnabled && ui.finalVideo.subtitleTemplateLockedId === previewTemplate.id ? '템플릿 고정됨 (해제)' : '이 템플릿 고정'}
+                              </button>
                             </div>
                           )}
                         </div>
-                        <div className="grid grid-cols-2 gap-2 pt-1">
-                          <button
-                            onClick={saveCurrentSubtitleTemplate}
-                            className="bg-emerald-500/80 border border-emerald-300/40 rounded-lg px-2 py-1.5 text-[10px] font-black text-black hover:bg-emerald-400 transition-all"
-                          >
-                            현재 설정 저장
-                          </button>
-                          <button
-                            onClick={() => applySubtitleTemplate('shorts')}
-                            className="bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] font-black text-white hover:bg-slate-700 transition-all"
-                          >
-                            빠른 기본값
-                          </button>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 pt-1">
-                          <button
-                            onClick={exportSubtitleTemplates}
-                            className="bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] font-black text-slate-100 hover:bg-slate-700 transition-all"
-                          >
-                            템플릿 내보내기
-                          </button>
-                          <label className="bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] font-black text-slate-100 hover:bg-slate-700 transition-all text-center cursor-pointer">
-                            템플릿 가져오기
-                            <input
-                              type="file"
-                              accept="application/json,.json"
-                              className="hidden"
-                              onChange={async (e) => {
-                                await importSubtitleTemplates(e.target.files?.[0] || null);
-                                e.currentTarget.value = '';
-                              }}
-                            />
-                          </label>
+                        <label className="block bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] font-black text-slate-100 hover:bg-slate-700 transition-all text-center cursor-pointer mt-1">
+                          템플릿 가져오기
+                          <input
+                            type="file"
+                            accept="application/json,.json"
+                            className="hidden"
+                            onChange={async (e) => {
+                              await importSubtitleTemplates(e.target.files?.[0] || null);
+                              e.currentTarget.value = '';
+                            }}
+                          />
+                        </label>
+                        <div className="space-y-2 pt-2 border-t border-white/10">
+                          <div className="flex items-center justify-between gap-2">
+                            <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">템플릿 제목 오버레이</label>
+                            <button
+                              onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleEnabled: !prev.finalVideo.templateTitleEnabled } }))}
+                              className={`px-3 py-1 rounded-md text-[10px] font-black border transition-all ${ui.finalVideo.templateTitleEnabled ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
+                            >
+                              {ui.finalVideo.templateTitleEnabled ? 'ON' : 'OFF'}
+                            </button>
+                          </div>
+                          {ui.finalVideo.templateTitleEnabled && (
+                            <>
+                              <input
+                                value={ui.finalVideo.templateTitleText}
+                                onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleText: e.target.value } }))}
+                                placeholder="템플릿 스타일로 넣을 제목"
+                                className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
+                                maxLength={90}
+                              />
+                              <button
+                                onClick={rewriteTemplateTitleFromHook}
+                                disabled={ui.finalVideo.templateTitleGenerating || !ui.selectedHookTitle}
+                                className={`w-full py-2 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.templateTitleGenerating ? 'running-gradient text-black' : 'bg-amber-500/80 text-black border-amber-300/40'} disabled:opacity-40`}
+                              >
+                                {ui.finalVideo.templateTitleGenerating ? '재작성 중지' : '바이럴 제목으로 재작성'}
+                              </button>
+                              <div className="grid grid-cols-2 gap-2">
+                                <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                  1줄 색상
+                                  <input
+                                    type="color"
+                                    value={ui.finalVideo.templateTitleLine1Color}
+                                    onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleLine1Color: e.target.value } }))}
+                                    className="w-7 h-6 bg-transparent border-0"
+                                  />
+                                </label>
+                                <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                  2줄 색상
+                                  <input
+                                    type="color"
+                                    value={ui.finalVideo.templateTitleLine2Color}
+                                    onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleLine2Color: e.target.value } }))}
+                                    className="w-7 h-6 bg-transparent border-0"
+                                  />
+                                </label>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                  강조 단어
+                                  <input
+                                    value={ui.finalVideo.templateTitleHighlightWord}
+                                    onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleHighlightWord: e.target.value } }))}
+                                    className="w-20 bg-transparent text-right outline-none"
+                                  />
+                                </label>
+                                <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                  강조색
+                                  <input
+                                    type="color"
+                                    value={ui.finalVideo.templateTitleHighlightColor}
+                                    onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleHighlightColor: e.target.value } }))}
+                                    className="w-7 h-6 bg-transparent border-0"
+                                  />
+                                </label>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                  폰트
+                                  <input
+                                    value={ui.finalVideo.templateTitleFontFamily}
+                                    onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleFontFamily: e.target.value } }))}
+                                    className="w-24 bg-transparent text-right outline-none"
+                                  />
+                                </label>
+                                <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                  외곽선
+                                  <input
+                                    type="color"
+                                    value={ui.finalVideo.templateTitleStrokeColor}
+                                    onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleStrokeColor: e.target.value } }))}
+                                    className="w-7 h-6 bg-transparent border-0"
+                                  />
+                                </label>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                  1줄 상단(mm)
+                                  <input
+                                    type="number"
+                                    min="5"
+                                    max="80"
+                                    step="1"
+                                    value={ui.finalVideo.templateTitleLine1TopMm}
+                                    onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleLine1TopMm: Number(e.target.value) } }))}
+                                    className="w-14 bg-transparent text-right outline-none"
+                                  />
+                                </label>
+                                <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                  2줄 하단(mm)
+                                  <input
+                                    type="number"
+                                    min="20"
+                                    max="120"
+                                    step="1"
+                                    value={ui.finalVideo.templateTitleLine2BottomMm}
+                                    onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleLine2BottomMm: Number(e.target.value) } }))}
+                                    className="w-14 bg-transparent text-right outline-none"
+                                  />
+                                </label>
+                              </div>
+                              <div className="flex items-center justify-between gap-2">
+                                <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">제목 크기</label>
+                                <span className="text-[10px] text-emerald-100 font-bold">{ui.finalVideo.templateTitleScale.toFixed(2)}x</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0.8"
+                                max="1.8"
+                                step="0.05"
+                                value={ui.finalVideo.templateTitleScale}
+                                onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleScale: Number(e.target.value) } }))}
+                                className="w-full accent-emerald-300"
+                              />
+                            </>
+                          )}
                         </div>
                         {subtitleTemplates.length > 0 && (
                           <div className="space-y-1 pt-1">
