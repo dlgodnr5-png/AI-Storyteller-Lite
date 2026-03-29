@@ -2011,7 +2011,10 @@ export default function App() {
       }
 
       const storedState = localStorage.getItem(YT_OAUTH_STATE_LS_KEY) || '';
-      const oauthMode = (localStorage.getItem(YT_OAUTH_MODE_LS_KEY) || 'youtube') as 'login' | 'youtube';
+      const rawMode = localStorage.getItem(YT_OAUTH_MODE_LS_KEY) || '';
+      const scopeText = decodeURIComponent(params.get('scope') || '');
+      const inferredMode: 'login' | 'youtube' = /youtube\.(upload|readonly)/i.test(scopeText) ? 'youtube' : 'login';
+      const oauthMode: 'login' | 'youtube' = rawMode === 'youtube' || rawMode === 'login' ? (rawMode as any) : inferredMode;
       localStorage.removeItem(YT_OAUTH_STATE_LS_KEY);
       localStorage.removeItem(YT_OAUTH_MODE_LS_KEY);
       if (!accessToken || !state || state !== storedState) {
@@ -2031,20 +2034,28 @@ export default function App() {
         let channelHandle = '@google-user';
         let channelId = '';
         let uploadsPlaylistId = '';
+        let youtubeConnected = false;
+        let youtubeConnectWarning = '';
         if (oauthMode === 'youtube') {
           const res = await fetch('https://www.googleapis.com/youtube/v3/channels?part=id,snippet,contentDetails,statistics&mine=true', {
             headers: { Authorization: `Bearer ${accessToken}` },
           });
           if (!res.ok) {
-            throw new Error(`채널 조회 실패 (${res.status})`);
+            if (res.status === 403) {
+              youtubeConnectWarning = 'YouTube 권한이 아직 승인되지 않았거나 YouTube Data API 접근이 제한되어 Google 로그인만 완료되었습니다.';
+            } else {
+              throw new Error(`채널 조회 실패 (${res.status})`);
+            }
+          } else {
+            const data = await res.json();
+            const channelItem = data?.items?.[0] || {};
+            const channel = channelItem?.snippet || {};
+            channelTitle = channel?.title || 'YouTube 채널';
+            channelHandle = channel?.customUrl ? `@${channel.customUrl.replace(/^@/, '')}` : '@connected-channel';
+            channelId = String(channelItem?.id || '');
+            uploadsPlaylistId = String(channelItem?.contentDetails?.relatedPlaylists?.uploads || '');
+            youtubeConnected = Boolean(channelId);
           }
-          const data = await res.json();
-          const channelItem = data?.items?.[0] || {};
-          const channel = channelItem?.snippet || {};
-          channelTitle = channel?.title || 'YouTube 채널';
-          channelHandle = channel?.customUrl ? `@${channel.customUrl.replace(/^@/, '')}` : '@connected-channel';
-          channelId = String(channelItem?.id || '');
-          uploadsPlaylistId = String(channelItem?.contentDetails?.relatedPlaylists?.uploads || '');
         }
         const session: YouTubeAuthSession = {
           accessToken,
@@ -2052,7 +2063,7 @@ export default function App() {
           channelTitle,
           channelHandle,
           email: userEmail,
-          authMode: oauthMode,
+          authMode: oauthMode === 'youtube' && youtubeConnected ? 'youtube' : 'login',
           channelId,
           uploadsPlaylistId,
         };
@@ -2069,7 +2080,7 @@ export default function App() {
               account.platform === 'youtube'
                 ? {
                     ...account,
-                    connected: oauthMode === 'youtube',
+                    connected: oauthMode === 'youtube' && youtubeConnected,
                     name: channelTitle,
                     handle: channelHandle,
                     email: userEmail,
@@ -2081,7 +2092,13 @@ export default function App() {
             ),
           },
         }));
-        alert(oauthMode === 'youtube' ? 'YouTube 계정 연결이 완료되었습니다.' : 'Google 로그인이 완료되었습니다.');
+        if (oauthMode === 'youtube' && youtubeConnected) {
+          alert('YouTube 계정 연결이 완료되었습니다.');
+        } else if (oauthMode === 'youtube' && youtubeConnectWarning) {
+          alert(youtubeConnectWarning);
+        } else {
+          alert('Google 로그인이 완료되었습니다.');
+        }
       } catch (err: any) {
         console.error(err);
         alert(`YouTube 채널 정보 확인에 실패했습니다: ${err?.message || '알 수 없는 오류'}`);
