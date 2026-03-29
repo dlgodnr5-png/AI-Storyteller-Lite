@@ -5020,8 +5020,7 @@ ${JSON.stringify(cutPayload)}`,
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={connectYouTubeAccount}
-                  disabled={!googleLoginReady}
-                  className="px-4 py-2.5 rounded-xl bg-cyan-500 text-black font-black disabled:opacity-40"
+                  className="px-4 py-2.5 rounded-xl bg-cyan-500 text-black font-black"
                 >
                   Google로 시작하기
                 </button>
@@ -5071,8 +5070,7 @@ ${JSON.stringify(cutPayload)}`,
             ) : (
               <button
                 onClick={connectYouTubeAccount}
-                disabled={!googleLoginReady}
-                className="text-[10px] px-2 py-1 rounded-md bg-cyan-500 text-black font-black disabled:opacity-40"
+                className="text-[10px] px-2 py-1 rounded-md bg-cyan-500 text-black font-black"
               >
                 로그인
               </button>
@@ -6513,7 +6511,6 @@ ${JSON.stringify(cutPayload)}`,
                         <div className="flex flex-col gap-2">
                           <button
                             onClick={connectYouTubeAccount}
-                            disabled={!googleLoginReady}
                             className={`px-3 py-2 rounded-lg text-xs font-black transition-all ${ui.publishing.accounts[0]?.connected ? 'bg-emerald-400 text-black' : 'bg-red-500 text-white hover:bg-red-400'}`}
                           >
                             {ui.publishing.accounts[0]?.connected ? '재연결' : '로그인/연결'}
