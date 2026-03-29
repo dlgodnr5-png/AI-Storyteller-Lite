@@ -1515,6 +1515,7 @@ export default function App() {
   const [previewingId, setPreviewingId] = useState<string | null>(null);
   const publishRetryTimersRef = useRef<Record<string, number[]>>({});
   const [youtubeAuth, setYoutubeAuth] = useState<YouTubeAuthSession | null>(null);
+  const [bypassLoginGate, setBypassLoginGate] = useState(false);
   const latestUiRef = useRef<any>(ui);
   const autoFlowLockRef = useRef(false);
   const actionApiRef = useRef<any>({});
@@ -1530,7 +1531,7 @@ export default function App() {
   const hasValidYouTubeAuth = Boolean(youtubeAuth?.accessToken && youtubeAuth.expiresAt > Date.now());
   const googleLoginReady = Boolean(googleClientId && googleRedirectUri);
   const isOAuthCallbackPath = window.location.pathname.includes('/oauth/google/callback');
-  const shouldShowLoginGate = requireGoogleLogin && !hasValidYouTubeAuth && !isOAuthCallbackPath;
+  const shouldShowLoginGate = requireGoogleLogin && !hasValidYouTubeAuth && !isOAuthCallbackPath && !bypassLoginGate;
   const envAdminEmails = useMemo(
     () => String(env.VITE_ADMIN_EMAILS || '').split(',').map(normalizeEmail).filter(Boolean),
     [env.VITE_ADMIN_EMAILS],
@@ -4968,7 +4969,18 @@ ${JSON.stringify(cutPayload)}`,
                 >
                   API 설정 열기
                 </button>
+                {!googleLoginReady && (
+                  <button
+                    onClick={() => setBypassLoginGate(true)}
+                    className="px-4 py-2.5 rounded-xl bg-amber-400 text-black font-black"
+                  >
+                    읽기 전용으로 계속
+                  </button>
+                )}
               </div>
+              {!googleLoginReady && (
+                <p className="text-[11px] text-amber-100/90">읽기 전용은 화면 확인/편집만 허용하며 다운로드·유튜브 연동·발행은 승인 전까지 차단됩니다.</p>
+              )}
             </div>
           </section>
         </div>
