@@ -2393,20 +2393,49 @@ ${ui.selectedHookTitle}
       setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '설명/태그 생성' } }));
       await actionApiRef.current.generateDescription();
 
+      const current = latestUiRef.current;
+      const autoTitle = (current?.description?.kr?.title || title || '').trim();
+      const autoDescBody = (current?.description?.kr?.desc || '').trim();
+      const autoTags = (current?.description?.kr?.tags || '').trim();
+      const autoHash = (current?.description?.kr?.hashtags || '').trim();
+      const autoDesc = [autoDescBody, autoHash, autoTags ? `태그: ${autoTags}` : ''].filter(Boolean).join('\n\n');
+      setUi(prev => ({
+        ...prev,
+        publishing: {
+          ...prev.publishing,
+          mobileStep: 5,
+          draft: {
+            ...prev.publishing.draft,
+            title: autoTitle.slice(0, 100),
+            description: autoDesc.slice(0, 5000),
+          },
+        },
+      }));
+
       setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, running: false, step: '완료', error: '' } }));
       alert('원클릭 자동 제작이 완료되었습니다. 14번 패널에서 예약/발행을 진행하세요.');
     } catch (err: any) {
       console.error(err);
+      const normalizeAutoFlowError = (message: string) => {
+        if (!message) return '자동 제작 중 오류가 발생했습니다.';
+        if (message.includes('대본')) return '대본 생성에 실패했습니다. 제목/키워드를 바꿔 다시 시도해 주세요.';
+        if (message.includes('TTS')) return '음성 생성에 실패했습니다. 목소리 모델이나 길이를 확인해 주세요.';
+        if (message.includes('컷')) return '컷 분할에 실패했습니다. 대본 문장 구성을 확인해 주세요.';
+        if (message.includes('프롬프트')) return '프롬프트 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.';
+        if (message.includes('렌더')) return '영상 렌더링에 실패했습니다. 컷 수와 음원 상태를 확인해 주세요.';
+        return '자동 제작 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+      };
+      const userError = normalizeAutoFlowError(err?.message || '');
       setUi(prev => ({
         ...prev,
         autoFlow: {
           ...prev.autoFlow,
           running: false,
           step: '오류',
-          error: err?.message || '원클릭 자동 제작 실패',
+          error: userError,
         },
       }));
-      alert(`원클릭 자동 제작 실패: ${err?.message || '알 수 없는 오류'}`);
+      alert(userError);
     } finally {
       autoFlowLockRef.current = false;
     }
@@ -2961,7 +2990,7 @@ ${stylePrompt}
     });
   };
 
-  const queueYouTubePublish = () => {
+  const queueYouTubePublish = (opts?: { immediate?: boolean }) => {
     if (!isPublishAdmin) {
       alert('관리자 권한이 있는 이메일만 예약 발행할 수 있습니다.');
       return;
@@ -2990,7 +3019,7 @@ ${stylePrompt}
     }
 
     const now = new Date();
-    const scheduleAt = ui.publishing.draft.scheduleAt || now.toISOString();
+    const scheduleAt = opts?.immediate ? now.toISOString() : (ui.publishing.draft.scheduleAt || now.toISOString());
     const scheduleDate = new Date(scheduleAt);
     if (Number.isNaN(scheduleDate.getTime())) {
       alert('예약 시간이 올바르지 않습니다.');
@@ -3028,7 +3057,7 @@ ${stylePrompt}
     const delay = Math.max(0, scheduleDate.getTime() - now.getTime());
     const timerId = window.setTimeout(() => runPublishAttempt(id, 0), delay);
     publishRetryTimersRef.current[id] = [timerId];
-    alert('YouTube 예약 발행 작업이 등록되었습니다.');
+    alert(opts?.immediate ? 'YouTube 즉시 발행 작업이 등록되었습니다.' : 'YouTube 예약 발행 작업이 등록되었습니다.');
   };
 
   const setPublishingStep = (step: number) => {
@@ -5381,13 +5410,22 @@ ${JSON.stringify(cutPayload)}`,
                         placeholder="실패/성공 알림 메일 주소"
                         className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-3 text-sm outline-none"
                       />
-                      <button
-                        onClick={queueYouTubePublish}
-                        disabled={!isPublishAdmin}
-                        className="w-full bg-gradient-to-r from-red-500 to-orange-500 text-white font-black py-3 rounded-xl hover:brightness-110 transition-all"
-                      >
-                        YouTube 예약 발행 등록
-                      </button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={() => queueYouTubePublish({ immediate: true })}
+                          disabled={!isPublishAdmin}
+                          className="w-full bg-gradient-to-r from-emerald-500 to-cyan-500 text-black font-black py-3 rounded-xl hover:brightness-110 transition-all disabled:opacity-40"
+                        >
+                          지금 발행
+                        </button>
+                        <button
+                          onClick={() => queueYouTubePublish()}
+                          disabled={!isPublishAdmin}
+                          className="w-full bg-gradient-to-r from-red-500 to-orange-500 text-white font-black py-3 rounded-xl hover:brightness-110 transition-all disabled:opacity-40"
+                        >
+                          예약 발행
+                        </button>
+                      </div>
                       {!isPublishAdmin && <p className="text-[10px] text-rose-300">관리자 이메일 권한이 있어야 발행할 수 있습니다.</p>}
                       <p className="text-[10px] text-slate-400">메일 알림은 브라우저 mailto 훅으로 연결됩니다. 서버 메일러 연동 시 자동 전송으로 교체 가능합니다.</p>
                     </div>
