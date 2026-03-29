@@ -2759,7 +2759,11 @@ ${ui.selectedHookTitle}
       await new Promise(r => setTimeout(r, 1200));
     }
     setAutoImageBatchRunning(false);
-    return { aborted: abortRef.current, failCount };
+    const finalFailCount = prompts.filter(cut => {
+      const job = latestUiRef.current?.imageJobs?.find((j: any) => j.cut === cut.index);
+      return !job?.imageUrl;
+    }).length;
+    return { aborted: abortRef.current, failCount: finalFailCount };
   };
 
   const runOneClickFromTitle = async (
@@ -6521,6 +6525,8 @@ ${JSON.stringify(cutPayload)}`,
                         alert('이미지 생성이 중지되었습니다.');
                       } else if (result.failCount > 0) {
                         alert(`${result.failCount}개의 이미지 생성에 실패했습니다.`);
+                      } else {
+                        alert('이미지 전체 생성이 완료되었습니다.');
                       }
                     }}
                     className={`text-white font-black px-4 py-6 rounded-xl transition-all text-xs vertical-text flex items-center justify-center ${autoImageBatchRunning ? 'running-gradient' : 'bg-indigo-600 hover:bg-indigo-700'}`}
