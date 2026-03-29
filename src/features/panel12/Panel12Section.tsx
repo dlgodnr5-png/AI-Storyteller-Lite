@@ -34,6 +34,15 @@ type Props = {
   ratioToCss: (ratio: string) => string;
   gridPositionToPercent: (n: number) => number;
   getBuiltinTemplatePreview: (template: any) => string;
+  syncReport: {
+    scriptSec: number;
+    ttsSec: number;
+    cutsSec: number;
+    renderSec: number;
+    srtLastEndSec: number;
+    deltaSec: number;
+    status: '정상' | '주의' | '실패';
+  };
 };
 
 export default function Panel12Section(props: Props) {
@@ -69,6 +78,7 @@ export default function Panel12Section(props: Props) {
     ratioToCss,
     gridPositionToPercent,
     getBuiltinTemplatePreview,
+    syncReport,
   } = props;
 
   const [previewTemplateId, setPreviewTemplateId] = React.useState<string>(BUILTIN_SUBTITLE_TEMPLATES[0]?.id || '');
@@ -831,6 +841,32 @@ export default function Panel12Section(props: Props) {
                   {ui.finalVideo.ffmpegNote}
                 </p>
               )}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[10px]">
+                <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">
+                  <p className="text-slate-400">대본(1.0x)</p>
+                  <p className="font-black text-amber-300">{Math.ceil(syncReport.scriptSec)}초</p>
+                </div>
+                <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">
+                  <p className="text-slate-400">TTS 실측</p>
+                  <p className="font-black text-cyan-300">{syncReport.ttsSec > 0 ? `${Math.ceil(syncReport.ttsSec)}초` : '미생성'}</p>
+                </div>
+                <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">
+                  <p className="text-slate-400">컷 총길이</p>
+                  <p className="font-black text-emerald-300">{Math.ceil(syncReport.cutsSec)}초</p>
+                </div>
+                <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">
+                  <p className="text-slate-400">렌더 기준</p>
+                  <p className="font-black text-white">{Math.ceil(syncReport.renderSec)}초</p>
+                </div>
+                <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">
+                  <p className="text-slate-400">SRT 마지막</p>
+                  <p className="font-black text-white">{Math.ceil(syncReport.srtLastEndSec)}초</p>
+                </div>
+                <div className={`border rounded-lg px-3 py-2 ${syncReport.status === '정상' ? 'bg-emerald-500/10 border-emerald-300/30' : syncReport.status === '주의' ? 'bg-amber-500/10 border-amber-300/30' : 'bg-rose-500/10 border-rose-300/30'}`}>
+                  <p className="text-slate-300">싱크 오차</p>
+                  <p className="font-black text-white">{syncReport.deltaSec.toFixed(2)}초 · {syncReport.status}</p>
+                </div>
+              </div>
             </div>
 
             <div className="bg-black/40 border border-white/5 rounded-[2rem] p-6 flex flex-col items-center justify-center text-center space-y-4">

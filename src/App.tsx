@@ -163,6 +163,16 @@ const normalizeHookTitleForOverlay = (text: string) => {
   return lines.join('\n');
 };
 
+const resolveSelectedVideoStyle = (selected: string) => {
+  const raw = String(selected || '').trim();
+  const leadingId = raw.split('.')[0]?.trim();
+  if (leadingId && /^\d+$/.test(leadingId)) {
+    const byId = VIDEO_STYLES_31.find(style => String(style.id) === leadingId);
+    if (byId) return byId;
+  }
+  return VIDEO_STYLES_31.find(style => raw.includes(style.name)) || VIDEO_STYLES_31[0];
+};
+
 const SFX_RECOMMEND_RULES: Array<{ category: string; keywords: string[] }> = [
   { category: '긴장', keywords: ['긴장', '공포', '위기', '불안', '비밀', '충격', '살인', '미스터리'] },
   { category: '비상사이렌', keywords: ['사건', '사고', '긴급', '경보', '출동', '응급', '재난', '속보'] },
@@ -1343,6 +1353,45 @@ export default function App() {
     return { scriptSec, ttsSec, cutsSec, effectiveSec };
   }, [scriptMetrics.sec1x, ui.tts.measuredDuration, ui.cuts.items, ui.finalVideo.slideDuration]);
   const longformGuide = useMemo(() => estimateLongformGuide(ui.script.output || ''), [ui.script.output]);
+  const syncReport = useMemo(() => {
+    const slides = ui.finalVideo.slides;
+    const slideDuration = Math.max(1, Number(ui.finalVideo.slideDuration || 3));
+    const slideDurationTotal = Math.max(0, slides.length * slideDuration);
+    const introDuration = ui.finalVideo.includeThumbnailIntro && ui.thumbnail.url
+      ? Math.max(0.5, Number(ui.finalVideo.thumbnailIntroDuration || 1))
+      : 0;
+    const narrationDuration = ui.tts.measuredDuration > 0 ? Number(ui.tts.measuredDuration) : slideDurationTotal;
+    const subtitleSource = (slides.length > 0 ? slides.map(slide => ui.cuts.items[slide.cut - 1] || '') : ui.cuts.items).filter(Boolean);
+    const segments = ui.finalVideo.subtitleEnabled
+      ? buildSubtitleSegments(subtitleSource, Math.max(1, narrationDuration), Math.max(12, ui.finalVideo.subtitleMaxChars))
+      : [];
+    const srtEnd = segments.length > 0 ? segments[segments.length - 1].end : 0;
+    const subtitleEndAbs = introDuration + srtEnd;
+    const ttsEndAbs = introDuration + narrationDuration;
+    const deltaSec = Math.abs(subtitleEndAbs - ttsEndAbs);
+    const status: '정상' | '주의' | '실패' = deltaSec <= 0.25 ? '정상' : deltaSec <= 0.8 ? '주의' : '실패';
+
+    return {
+      scriptSec: timingSummary.scriptSec,
+      ttsSec: timingSummary.ttsSec,
+      cutsSec: timingSummary.cutsSec,
+      renderSec: Math.max(slideDurationTotal + introDuration, ttsEndAbs),
+      srtLastEndSec: subtitleEndAbs,
+      deltaSec,
+      status,
+    };
+  }, [
+    ui.finalVideo.slides,
+    ui.finalVideo.slideDuration,
+    ui.finalVideo.includeThumbnailIntro,
+    ui.finalVideo.thumbnailIntroDuration,
+    ui.finalVideo.subtitleEnabled,
+    ui.finalVideo.subtitleMaxChars,
+    ui.thumbnail.url,
+    ui.tts.measuredDuration,
+    ui.cuts.items,
+    timingSummary,
+  ]);
 
   useEffect(() => {
     if (!initialUiRef.current) {
@@ -1732,7 +1781,7 @@ export default function App() {
 
     try {
       const ai = new GoogleGenAI({ apiKey: keys.g1 });
-      const stylePrompt = VIDEO_STYLES_31.find(s => ui.videoStyle.selected.includes(s.name))?.prompt || '';
+      const stylePrompt = resolveSelectedVideoStyle(ui.videoStyle.selected)?.prompt || '';
       const scriptLang = ui.script.lang === 'KR' ? '한국어' : ui.script.lang === 'EN' ? '영어' : '일본어';
       
       // 1. Generate Visual Prompt
@@ -2219,7 +2268,7 @@ ${ui.selectedHookTitle}
     
     try {
       const ai = new GoogleGenAI({ apiKey: keys.g1 });
-      const stylePrompt = VIDEO_STYLES_31.find(s => ui.videoStyle.selected.includes(s.name))?.prompt || '';
+      const stylePrompt = resolveSelectedVideoStyle(ui.videoStyle.selected)?.prompt || '';
       
       const prompts: any[] = [];
       for (let i = 0; i < ui.cuts.items.length; i++) {
@@ -2853,7 +2902,7 @@ ${stylePrompt}
 
     try {
       const ai = new GoogleGenAI({ apiKey: keys.g1 });
-      const stylePrompt = VIDEO_STYLES_31.find(s => ui.videoStyle.selected.includes(s.name))?.prompt || '';
+      const stylePrompt = resolveSelectedVideoStyle(ui.videoStyle.selected)?.prompt || '';
       
       const res = await ai.models.generateContent({
         model: 'gemini-3.1-flash-image-preview',
@@ -4914,6 +4963,7 @@ ${JSON.stringify(cutPayload)}`,
           ratioToCss={ratioToCss}
           gridPositionToPercent={gridPositionToPercent}
           getBuiltinTemplatePreview={getBuiltinTemplatePreview}
+          syncReport={syncReport}
         />
 
         {/* 13. 영상편집 */}
