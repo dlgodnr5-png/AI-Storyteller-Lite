@@ -210,6 +210,18 @@ const CATEGORY_MAP: Record<string, string> = {
 
 // --- Helper Functions ---
 const formatNumber = (num: number) => num.toLocaleString('en-US');
+const toDateTimeLocalValue = (date: Date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${d}T${hh}:${mm}`;
+};
+const toFutureDateTimeLocalValue = (minutes: number) => {
+  const safe = [30, 60, 120].includes(Number(minutes)) ? Number(minutes) : 60;
+  return toDateTimeLocalValue(new Date(Date.now() + safe * 60 * 1000));
+};
 
 const addWavHeader = (base64Pcm: string, sampleRate: number = 24000) => {
   const binaryString = atob(base64Pcm);
@@ -1452,10 +1464,17 @@ export default function App() {
     },
     productPromo: {
       imageUrl: '',
+      productUrl: '',
+      productComment: '',
       running: false,
       step: '',
       error: '',
       targetSeconds: 20,
+      renderMode: 'image_slide' as 'ai_video' | 'image_slide',
+      hookVideoCount: 2,
+      targetCuts: 5,
+      autoQueuePublish: false,
+      autoScheduleMinutes: 60,
     },
   });
 
@@ -2458,7 +2477,15 @@ ${ui.selectedHookTitle}
     return { aborted: abortRef.current, failCount };
   };
 
-  const runOneClickFromTitle = async (title: string, opts?: { productMode?: boolean }) => {
+  const runOneClickFromTitle = async (
+    title: string,
+    opts?: {
+      productMode?: boolean;
+      productRenderMode?: 'ai_video' | 'image_slide';
+      productHookVideoCount?: number;
+      productTargetCuts?: number;
+    },
+  ) => {
     if (!title?.trim()) return;
     if (!keys.g1) {
       alert('Gemini API 키를 먼저 설정하세요.');
@@ -2504,17 +2531,22 @@ ${ui.selectedHookTitle}
     try {
       await new Promise(r => setTimeout(r, 0));
       if (opts?.productMode) {
+        const productRenderMode = opts?.productRenderMode || 'image_slide';
+        const productHookVideoCount = Math.max(0, Number(opts?.productHookVideoCount ?? 2));
         setUi(prev => ({
           ...prev,
           script: {
             ...prev.script,
             type: 'shorts',
             length: '20초',
+            lang: 'KR',
             tone: '상품홍보, 후킹형',
           },
           finalVideo: {
             ...prev.finalVideo,
-            type: 'image_slide',
+            type: productRenderMode,
+            useHybridHookVideos: productRenderMode === 'image_slide' ? productHookVideoCount > 0 : prev.finalVideo.useHybridHookVideos,
+            hookVideoCount: productRenderMode === 'image_slide' ? productHookVideoCount : prev.finalVideo.hookVideoCount,
           },
         }));
         await new Promise(r => setTimeout(r, 0));
@@ -2536,24 +2568,36 @@ ${ui.selectedHookTitle}
 
       await actionApiRef.current.rewriteTemplateTitleFromHook();
 
-      await withRetries(
-        'TTS 생성',
-        () => actionApiRef.current.handleGenerateTTS(),
-        () => Boolean(latestUiRef.current?.tts?.audioUrl),
-        2,
-      );
+      try {
+        await withRetries(
+          'TTS 생성',
+          () => actionApiRef.current.handleGenerateTTS(),
+          () => Boolean(latestUiRef.current?.tts?.audioUrl),
+          2,
+        );
+      } catch (ttsErr) {
+        if (!opts?.productMode || !latestUiRef.current?.tts?.audioUrl) {
+          throw ttsErr;
+        }
+        setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: 'TTS 생성(경고: 이전 음원 사용)' } }));
+      }
 
       if (opts?.productMode && Number(latestUiRef.current?.tts?.measuredDuration || 0) > 20) {
         const lang = (['KR', 'EN', 'JP'].includes(latestUiRef.current?.script?.lang) ? latestUiRef.current?.script?.lang : 'KR') as 'KR' | 'EN' | 'JP';
         const stricter = trimScriptToSeconds(latestUiRef.current?.script?.output || '', lang, 17);
         setUi(prev => ({ ...prev, script: { ...prev.script, output: stricter } }));
         await new Promise(r => setTimeout(r, 0));
-        await withRetries(
-          'TTS 재생성(20초 보정)',
-          () => actionApiRef.current.handleGenerateTTS(),
-          () => Boolean(latestUiRef.current?.tts?.audioUrl) && Number(latestUiRef.current?.tts?.measuredDuration || 0) <= 20,
-          2,
-        );
+        try {
+          await withRetries(
+            'TTS 재생성(20초 보정)',
+            () => actionApiRef.current.handleGenerateTTS(),
+            () => Boolean(latestUiRef.current?.tts?.audioUrl) && Number(latestUiRef.current?.tts?.measuredDuration || 0) <= 20,
+            2,
+          );
+        } catch (ttsTrimErr) {
+          if (!latestUiRef.current?.tts?.audioUrl) throw ttsTrimErr;
+          setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: 'TTS 보정 한계(20초 초과, 계속 진행)' } }));
+        }
       }
 
       await withRetries(
@@ -2564,20 +2608,49 @@ ${ui.selectedHookTitle}
       );
 
       if (opts?.productMode) {
-        const compact = compactCutsToMax([...(latestUiRef.current?.cuts?.items || [])], 20);
+        const targetCuts = Math.max(3, Math.min(8, Number(opts?.productTargetCuts ?? 5)));
+        const compact = compactCutsToMax([...(latestUiRef.current?.cuts?.items || [])], targetCuts);
         setUi(prev => ({ ...prev, cuts: { ...prev.cuts, items: compact } }));
       }
 
       await withRetries(
         '프롬프트 생성',
         () => actionApiRef.current.generateImagePrompts(),
-        () => (latestUiRef.current?.cuts?.prompts || []).length > 0,
+        () => {
+          const prompts = latestUiRef.current?.cuts?.prompts || [];
+          return prompts.length > 0 && prompts.some((p: any) => (p?.prompt || '').trim().length >= 12);
+        },
         2,
       );
 
       setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '이미지 자동 생성' } }));
       const imageBatch = await runAutoImageBatch();
       if (imageBatch.aborted) throw new Error('이미지 생성 중지됨');
+
+      if (opts?.productMode && latestUiRef.current?.productPromo?.imageUrl) {
+        const fallbackImage = latestUiRef.current.productPromo.imageUrl;
+        const cuts = latestUiRef.current?.cuts?.items || [];
+        setUi(prev => {
+          const nextJobs = [...(prev.imageJobs || [])];
+          for (let i = 0; i < cuts.length; i += 1) {
+            const cut = i + 1;
+            const existsIdx = nextJobs.findIndex((j: any) => j.cut === cut);
+            if (existsIdx < 0) {
+              nextJobs.push({ cut, status: '원본 대체(자동복구)', imageUrl: fallbackImage });
+              continue;
+            }
+            if (!nextJobs[existsIdx]?.imageUrl) {
+              nextJobs[existsIdx] = {
+                ...nextJobs[existsIdx],
+                status: '원본 대체(자동복구)',
+                imageUrl: fallbackImage,
+              };
+            }
+          }
+          return { ...prev, imageJobs: nextJobs };
+        });
+        await new Promise(r => setTimeout(r, 0));
+      }
 
       setUi(prev => ({
         ...prev,
@@ -2597,12 +2670,7 @@ ${ui.selectedHookTitle}
         () => actionApiRef.current.handleExportSlideVideo(),
         () => {
           if (!latestUiRef.current?.finalVideo?.url) return false;
-          if (!opts?.productMode) return true;
-          const cuts = latestUiRef.current?.cuts?.items || [];
-          const ttsSec = Number(latestUiRef.current?.tts?.measuredDuration || 0);
-          const slideSec = Math.max(1, Number(latestUiRef.current?.finalVideo?.slideDuration || 3));
-          const total = Math.max(ttsSec, cuts.length * slideSec);
-          return total <= 20.5;
+          return true;
         },
         2,
       );
@@ -2627,10 +2695,16 @@ ${ui.selectedHookTitle}
             description: autoDesc.slice(0, 5000),
           },
         },
+        panelsOpen: {
+          ...prev.panelsOpen,
+          p13: true,
+          p14: true,
+        },
       }));
 
       setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, running: false, step: '완료', error: '' } }));
       alert('원클릭 자동 제작이 완료되었습니다. 14번 패널에서 예약/발행을 진행하세요.');
+      return true;
     } catch (err: any) {
       console.error(err);
       const normalizeAutoFlowError = (message: string) => {
@@ -2653,6 +2727,7 @@ ${ui.selectedHookTitle}
         },
       }));
       alert(userError);
+      return false;
     } finally {
       autoFlowLockRef.current = false;
     }
@@ -2701,12 +2776,39 @@ ${ui.selectedHookTitle}
       const mimeMatch = ui.productPromo.imageUrl.match(/^data:(.*?);base64,/i);
       const mimeType = mimeMatch?.[1] || 'image/jpeg';
       const imageBase64 = ui.productPromo.imageUrl.split(',')[1] || '';
+      const productUrl = (ui.productPromo.productUrl || '').trim();
+      const productComment = (ui.productPromo.productComment || '').trim();
+      const trendContext = (results || [])
+        .slice(0, 6)
+        .map((r: any, i: number) => `${i + 1}) ${r.title} | 조회수 ${formatNumber(Number(r.viewCount || 0))}`)
+        .join('\n');
       const analysis = await ai.models.generateContent({
         model: 'gemini-2.5-pro',
         contents: [
           {
             parts: [
-              { text: '이 상품 사진을 분석해 20초 이하 쇼츠 홍보용 후킹 제목을 만들어 주세요. JSON만 반환: {"hookTitle":"...","tone":"...","audience":"..."}' },
+              {
+                text: `당신은 한국 쇼츠 커머스 카피라이터입니다.
+다음 정보를 종합해 20초 이하 상품홍보용 훅을 설계하세요.
+
+[사용자 상품 URL]
+${productUrl || '미입력'}
+
+[사용자 코멘트]
+${productComment || '미입력'}
+
+[YouTube 트렌드 참고 데이터]
+${trendContext || '데이터 없음(검색 미실행)'}
+
+[필수 규칙]
+1) 한국어로만 작성
+2) 과장/낚시 금지, 즉시 구매욕을 자극하는 후킹 문장
+3) 타깃은 한국 사용자
+4) 20초 이하 쇼츠에 맞는 압축 정보
+
+JSON만 반환:
+{"hookTitle":"...","tone":"...","audience":"...","scriptHint":"...","visualGuide":"..."}`,
+              },
               { inlineData: { mimeType, data: imageBase64 } },
             ],
           },
@@ -2723,8 +2825,13 @@ ${ui.selectedHookTitle}
           ...prev.script,
           type: 'shorts',
           length: '20초',
-          tone: String(parsed?.tone || '상품홍보, 후킹형'),
+          lang: 'KR',
+          tone: `${String(parsed?.tone || '상품홍보, 후킹형')} · 한국 로컬 광고 톤${productComment ? ` · 사용자 코멘트 반영: ${productComment.slice(0, 60)}` : ''}`,
           targetAudience: String(parsed?.audience || prev.script.targetAudience),
+        },
+        finalVideo: {
+          ...prev.finalVideo,
+          modifications: String(parsed?.visualGuide || prev.finalVideo.modifications || ''),
         },
         productPromo: {
           ...prev.productPromo,
@@ -2732,7 +2839,25 @@ ${ui.selectedHookTitle}
         },
       }));
 
-      await runOneClickFromTitle(hookTitle, { productMode: true });
+      const ok = await runOneClickFromTitle(hookTitle, {
+        productMode: true,
+        productRenderMode: ui.productPromo.renderMode,
+        productHookVideoCount: ui.productPromo.renderMode === 'image_slide' ? Number(ui.productPromo.hookVideoCount || 0) : 0,
+        productTargetCuts: Number(ui.productPromo.targetCuts || 5),
+      });
+
+      if (!ok) {
+        setUi(prev => ({
+          ...prev,
+          productPromo: {
+            ...prev.productPromo,
+            running: false,
+            step: '오류',
+            error: latestUiRef.current?.autoFlow?.error || '상품 자동 제작 중 일부 단계가 실패했습니다.',
+          },
+        }));
+        return;
+      }
 
       setUi(prev => ({
         ...prev,
@@ -2742,7 +2867,52 @@ ${ui.selectedHookTitle}
           step: '완료',
           error: '',
         },
+        publishing: {
+          ...prev.publishing,
+          mobileStep: 5,
+        },
+        panelsOpen: {
+          ...prev.panelsOpen,
+          p13: true,
+          p14: true,
+        },
       }));
+
+      if (latestUiRef.current?.productPromo?.autoQueuePublish) {
+        try {
+          const scheduleMinutes = [30, 60, 120].includes(Number(latestUiRef.current?.productPromo?.autoScheduleMinutes))
+            ? Number(latestUiRef.current?.productPromo?.autoScheduleMinutes)
+            : 60;
+          setUi(prev => ({
+            ...prev,
+            publishing: {
+              ...prev.publishing,
+              draft: {
+                ...prev.publishing.draft,
+                scheduleAt: toFutureDateTimeLocalValue(scheduleMinutes),
+              },
+            },
+          }));
+          queueYouTubePublish();
+          setUi(prev => ({
+            ...prev,
+            productPromo: {
+              ...prev.productPromo,
+              step: `완료 · ${scheduleMinutes}분 후 예약 발행 등록됨`,
+            },
+          }));
+        } catch (publishErr) {
+          console.error(publishErr);
+          setUi(prev => ({
+            ...prev,
+            productPromo: {
+              ...prev.productPromo,
+              step: '완료(발행 등록 실패)',
+              error: '자동 발행 등록에 실패했습니다. 14번 패널에서 수동으로 지금 발행을 눌러 주세요.',
+            },
+          }));
+        }
+      }
     } catch (err: any) {
       console.error(err);
       setUi(prev => ({
@@ -2784,7 +2954,22 @@ ${ui.selectedHookTitle}
     try {
       const ai = new GoogleGenAI({ apiKey: keys.g1 });
       const stylePrompt = resolveSelectedVideoStyle(ui.videoStyle.selected)?.prompt || '';
+      const isProductPromoContext = Boolean(ui.productPromo.imageUrl) && (ui.productPromo.running || /상품홍보|커머스|판매|제품/.test(ui.script.tone || ''));
+      const promoUrl = (ui.productPromo.productUrl || '').trim();
+      const promoComment = (ui.productPromo.productComment || '').trim();
+      const trendContext = (results || [])
+        .slice(0, 6)
+        .map((r: any, i: number) => `${i + 1}) ${r.title}`)
+        .join('\n');
       
+      const fallbackPromptFromCut = (cutText: string) => {
+        const seed = normalizeSubtitleText(cutText || 'product close-up scene') || 'product close-up scene';
+        if (isProductPromoContext) {
+          return `Korean e-commerce commercial scene, Korean background in Seoul, Korean model, product focus on ${seed}, all visible text in Korean Hangul only, premium lighting, high detail, no English letters.`;
+        }
+        return `Cinematic product advertisement scene, focus on ${seed}, premium lighting, clean background, dynamic composition, high detail, no text, no letters.`;
+      };
+
       const prompts: any[] = [];
       for (let i = 0; i < ui.cuts.items.length; i++) {
         if (taskAbortRef.current.prompts) break;
@@ -2800,21 +2985,35 @@ ${ui.script.output.substring(0, 300)}...
 [스타일 지침]
 ${stylePrompt}
 
+[상품 URL]
+${promoUrl || '미입력'}
+
+[상품 코멘트]
+${promoComment || '미입력'}
+
+[YouTube 트렌드 참고]
+${trendContext || '데이터 없음'}
+
+[상품홍보 강제 로케일 규칙]
+${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 구성\n- 등장 인물은 한국인\n- 텍스트가 등장한다면 한국어(한글)만 허용\n- 한국 모바일 커머스 광고 톤으로 구성' : '- 일반 콘텐츠 규칙 적용'}
+
 [요청 사항]
 1. 위 컷의 의미를 시각적으로 가장 강력하게 전달할 수 있는 묘사를 하세요.
-2. 절대 화면에 텍스트나 문자가 포함되지 않게 하세요 (NO TEXT, NO LETTERS).
+2. ${isProductPromoContext ? '텍스트가 필요하면 한국어(한글)만 사용하고, 영어/일본어/중국어 텍스트는 금지하세요.' : '절대 화면에 텍스트나 문자가 포함되지 않게 하세요 (NO TEXT, NO LETTERS).'}
 3. 인물의 외모, 의상, 환경이 전체 영상에서 일관되게 유지되도록 묘사하세요.
-4. 불필요한 설명 없이 1~2문장의 영어 프롬프트만 출력하세요.`;
+4. ${isProductPromoContext ? '한국인/한국 배경/한국어 로케일 조건을 반드시 반영하세요.' : '위 조건을 유지하세요.'}
+5. 불필요한 설명 없이 1~2문장의 영어 프롬프트만 출력하세요.`;
 
         try {
           const res = await ai.models.generateContent({
             model: "gemini-3-flash-preview",
             contents: p
           });
-          prompts.push({ index: i + 1, prompt: res.text?.trim() || '' });
+          const generated = (res.text || '').trim();
+          prompts.push({ index: i + 1, prompt: generated || fallbackPromptFromCut(text) });
         } catch (promptErr) {
           console.error(`프롬프트 ${i + 1} 생성 실패:`, promptErr);
-          prompts.push({ index: i + 1, prompt: '' });
+          prompts.push({ index: i + 1, prompt: fallbackPromptFromCut(text) });
         }
         if (i < ui.cuts.items.length - 1 && !taskAbortRef.current.prompts) {
           await new Promise(r => setTimeout(r, 1000));
@@ -3386,7 +3585,7 @@ ${stylePrompt}
   const PanelHeader = ({ title, id, colorClass, badge }: { title: string, id: keyof typeof ui.panelsOpen, colorClass: string, badge?: string }) => (
     <div className="flex items-center justify-between mb-4">
       <div className="flex items-center gap-3">
-        <h3 className={`text-xl font-black ${colorClass}`}>{title}</h3>
+        <h3 id={`panel-${id}`} className={`text-xl font-black ${colorClass}`}>{title}</h3>
         {badge && (
           <span className="bg-amber-500/20 text-amber-500 text-[10px] font-black px-2 py-0.5 rounded-md border border-amber-500/30">
             {badge}
@@ -3443,14 +3642,26 @@ ${stylePrompt}
       } else {
         setUi(prev => ({
           ...prev,
-          imageJobs: prev.imageJobs.map(j => j.cut === cutIndex ? { ...j, status: '이미지 없음 (재시도)' } : j)
+          imageJobs: prev.imageJobs.map(j => j.cut === cutIndex
+            ? {
+                ...j,
+                status: ui.productPromo.imageUrl ? '원본 대체' : '이미지 없음 (재시도)',
+                imageUrl: ui.productPromo.imageUrl || j.imageUrl,
+              }
+            : j)
         }));
       }
     } catch (err) {
       console.error(err);
       setUi(prev => ({
         ...prev,
-        imageJobs: prev.imageJobs.map(j => j.cut === cutIndex ? { ...j, status: '실패' } : j)
+        imageJobs: prev.imageJobs.map(j => j.cut === cutIndex
+          ? {
+              ...j,
+              status: ui.productPromo.imageUrl ? '원본 대체(실패복구)' : '실패',
+              imageUrl: ui.productPromo.imageUrl || j.imageUrl,
+            }
+          : j)
       }));
     }
   };
@@ -4573,6 +4784,137 @@ ${JSON.stringify(cutPayload)}`,
             {ui.productPromo.running ? '자동 제작 중...' : '상품홍보 원클릭 실행'}
           </button>
         </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+          <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+            <p className="text-[10px] font-black text-fuchsia-200 uppercase tracking-widest">출력 방식</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, renderMode: 'image_slide' } }))}
+                className={`py-2 rounded-lg text-[10px] font-black border transition-all ${ui.productPromo.renderMode === 'image_slide' ? 'bg-fuchsia-400 text-black border-fuchsia-300' : 'bg-white/5 text-slate-300 border-white/15'}`}
+              >
+                이미지 슬라이드
+              </button>
+              <button
+                onClick={() => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, renderMode: 'ai_video' } }))}
+                className={`py-2 rounded-lg text-[10px] font-black border transition-all ${ui.productPromo.renderMode === 'ai_video' ? 'bg-fuchsia-400 text-black border-fuchsia-300' : 'bg-white/5 text-slate-300 border-white/15'}`}
+              >
+                AI 비디오
+              </button>
+            </div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+            <p className="text-[10px] font-black text-fuchsia-200 uppercase tracking-widest">컷 구성</p>
+            <div className="flex items-center justify-between text-[10px] text-slate-300">
+              <span>총 컷 수</span>
+              <span className="font-black text-white">{Math.max(3, Math.min(8, Number(ui.productPromo.targetCuts || 5)))}컷</span>
+            </div>
+            <input
+              type="range"
+              min="3"
+              max="8"
+              step="1"
+              value={Math.max(3, Math.min(8, Number(ui.productPromo.targetCuts || 5)))}
+              onChange={(e) => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, targetCuts: Number(e.target.value) } }))}
+              className="w-full accent-fuchsia-400"
+            />
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+            <p className="text-[10px] font-black text-fuchsia-200 uppercase tracking-widest">영상 훅 컷 수</p>
+            <div className="flex items-center justify-between text-[10px] text-slate-300">
+              <span>초반 영상</span>
+              <span className="font-black text-white">{ui.productPromo.renderMode === 'image_slide' ? Math.max(0, Math.min(3, Number(ui.productPromo.hookVideoCount || 0))) : 0}컷</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="3"
+              step="1"
+              disabled={ui.productPromo.renderMode !== 'image_slide'}
+              value={ui.productPromo.renderMode === 'image_slide' ? Math.max(0, Math.min(3, Number(ui.productPromo.hookVideoCount || 0))) : 0}
+              onChange={(e) => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, hookVideoCount: Number(e.target.value) } }))}
+              className="w-full accent-fuchsia-400 disabled:opacity-40"
+            />
+            <p className="text-[10px] text-slate-500">권장: 2개 영상 + 3개 이미지(총 5컷)</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+          <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+            <label className="text-[10px] font-black text-fuchsia-200 uppercase tracking-widest">상품 URL</label>
+            <input
+              type="url"
+              value={ui.productPromo.productUrl}
+              onChange={(e) => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, productUrl: e.target.value } }))}
+              placeholder="https://... (스마트스토어/쿠팡/자사몰 등)"
+              className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none"
+            />
+            <p className="text-[10px] text-slate-500">Gemini가 URL 맥락을 참고해 후킹 문구와 장면을 보강합니다.</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+            <label className="text-[10px] font-black text-fuchsia-200 uppercase tracking-widest">상품 한줄 코멘트</label>
+            <textarea
+              value={ui.productPromo.productComment}
+              onChange={(e) => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, productComment: e.target.value } }))}
+              placeholder="예: 직장인 아침 대용으로 10초 준비, 당류 낮고 포만감 좋음"
+              className="w-full h-20 resize-none bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none"
+            />
+            <p className="text-[10px] text-slate-500">사용자 코멘트는 대본 톤, CTA, 컷별 이미지 프롬프트에 반영됩니다.</p>
+          </div>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3 mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-black text-fuchsia-200 uppercase tracking-widest">발행 자동화 옵션</p>
+            <p className="text-[10px] text-slate-400 mt-1">자동 제작 완료 후 13/14번을 자동 준비합니다. 필요하면 즉시 발행 작업까지 자동 등록할 수 있습니다.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={String([30, 60, 120].includes(Number(ui.productPromo.autoScheduleMinutes)) ? Number(ui.productPromo.autoScheduleMinutes) : 60)}
+              onChange={(e) => {
+                const mins = Number(e.target.value);
+                setUi(prev => ({
+                  ...prev,
+                  productPromo: { ...prev.productPromo, autoScheduleMinutes: mins },
+                  publishing: {
+                    ...prev.publishing,
+                    draft: {
+                      ...prev.publishing.draft,
+                      scheduleAt: toFutureDateTimeLocalValue(mins),
+                    },
+                  },
+                }));
+              }}
+              className="bg-black/40 border border-white/15 rounded-lg px-2 py-2 text-[11px] text-white outline-none"
+              title="자동 예약 시간"
+            >
+              <option value="30">+30분</option>
+              <option value="60">+60분</option>
+              <option value="120">+120분</option>
+            </select>
+            <button
+              onClick={() => setUi(prev => {
+                const nextAuto = !prev.productPromo.autoQueuePublish;
+                const mins = [30, 60, 120].includes(Number(prev.productPromo.autoScheduleMinutes))
+                  ? Number(prev.productPromo.autoScheduleMinutes)
+                  : 60;
+                return {
+                  ...prev,
+                  productPromo: { ...prev.productPromo, autoQueuePublish: nextAuto },
+                  publishing: nextAuto
+                    ? {
+                        ...prev.publishing,
+                        draft: {
+                          ...prev.publishing.draft,
+                          scheduleAt: toFutureDateTimeLocalValue(mins),
+                        },
+                      }
+                    : prev.publishing,
+                };
+              })}
+              className={`px-3 py-2 rounded-lg text-xs font-black border transition-all ${ui.productPromo.autoQueuePublish ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
+            >
+              {ui.productPromo.autoQueuePublish ? `완료 후 +${[30, 60, 120].includes(Number(ui.productPromo.autoScheduleMinutes)) ? Number(ui.productPromo.autoScheduleMinutes) : 60}분 예약발행 자동등록 ON` : '자동등록 OFF'}
+            </button>
+          </div>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-4">
           <label className="rounded-2xl border border-dashed border-fuchsia-300/40 bg-fuchsia-500/5 p-3 cursor-pointer hover:bg-fuchsia-500/10 transition-all min-h-[160px] flex items-center justify-center">
             {ui.productPromo.imageUrl ? (
@@ -4594,6 +4936,29 @@ ${JSON.stringify(cutPayload)}`,
             <p className="text-[11px] text-slate-300">목표 길이: <span className="font-black text-white">20초 이하</span></p>
             <p className="text-[11px] text-slate-300">진행 단계: <span className="font-black text-emerald-300">{ui.productPromo.step || '대기'}</span></p>
             {ui.productPromo.error && <p className="text-[11px] text-rose-300 font-bold">{ui.productPromo.error}</p>}
+            {ui.productPromo.renderMode === 'image_slide' && (
+              <p className="text-[10px] text-slate-500">혼합 모드에서는 11번 패널에서 초반 훅 컷 영상 업로드 시 자동으로 우선 반영됩니다.</p>
+            )}
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button
+                onClick={() => {
+                  setUi(prev => ({ ...prev, panelsOpen: { ...prev.panelsOpen, p13: true }, publishing: { ...prev.publishing, mobileStep: 3 } }));
+                  document.getElementById('panel-p13')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                className="px-3 py-1.5 rounded-lg text-[10px] font-black bg-white/10 text-white border border-white/15 hover:bg-white/20"
+              >
+                13번 바로가기
+              </button>
+              <button
+                onClick={() => {
+                  setUi(prev => ({ ...prev, panelsOpen: { ...prev.panelsOpen, p14: true }, publishing: { ...prev.publishing, mobileStep: 5 } }));
+                  document.getElementById('panel-p14')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                className="px-3 py-1.5 rounded-lg text-[10px] font-black bg-red-500/80 text-white border border-red-300/40 hover:bg-red-500"
+              >
+                14번 발행 바로가기
+              </button>
+            </div>
             <p className="text-[10px] text-slate-500">완료 후 14번 패널에서 `지금 발행` 또는 `예약 발행`만 누르면 됩니다.</p>
           </div>
         </div>
