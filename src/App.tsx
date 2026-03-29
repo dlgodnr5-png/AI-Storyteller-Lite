@@ -1420,6 +1420,7 @@ export default function App() {
         { id: 'yt-main', platform: 'youtube' as PublishPlatform, name: 'YouTube 기본 채널', handle: '@your-channel', email: '', channelId: '', uploadsPlaylistId: '', connected: false, lastSyncedAt: '' },
       ],
       ownerEmail: '',
+      ownerPhone: '',
       adminEmails: [] as string[],
       pendingAdminEmail: '',
       approvedEmails: [] as string[],
@@ -1527,6 +1528,7 @@ export default function App() {
   const env = (import.meta as any).env || {};
   const googleClientId = env.VITE_GOOGLE_CLIENT_ID || '';
   const googleRedirectUri = env.VITE_GOOGLE_REDIRECT_URI || `${window.location.origin}/oauth/google/callback`;
+  const alimtalkWebhookUrl = String(env.VITE_ALIMTALK_WEBHOOK_URL || '').trim();
   const requireGoogleLogin = String(env.VITE_REQUIRE_GOOGLE_LOGIN || 'true').toLowerCase() !== 'false';
   const hasValidYouTubeAuth = Boolean(youtubeAuth?.accessToken && youtubeAuth.expiresAt > Date.now());
   const googleLoginReady = Boolean(googleClientId && googleRedirectUri);
@@ -1702,6 +1704,7 @@ export default function App() {
           notifyEmail: typeof parsed.notifyEmail === 'string' ? parsed.notifyEmail : prev.publishing.notifyEmail,
           mobileStep: Number.isFinite(parsed.mobileStep) ? Math.min(5, Math.max(1, Number(parsed.mobileStep))) : prev.publishing.mobileStep,
           ownerEmail: typeof parsed.ownerEmail === 'string' ? parsed.ownerEmail : prev.publishing.ownerEmail,
+          ownerPhone: typeof parsed.ownerPhone === 'string' ? parsed.ownerPhone : prev.publishing.ownerPhone,
           adminEmails: Array.isArray(parsed.adminEmails) ? parsed.adminEmails : prev.publishing.adminEmails,
           approvedEmails: Array.isArray(parsed.approvedEmails) ? parsed.approvedEmails : prev.publishing.approvedEmails,
           accessRequests: Array.isArray(parsed.accessRequests) ? parsed.accessRequests : prev.publishing.accessRequests,
@@ -1727,6 +1730,7 @@ export default function App() {
         notifyEmail: ui.publishing.notifyEmail,
         mobileStep: ui.publishing.mobileStep,
         ownerEmail: ui.publishing.ownerEmail,
+        ownerPhone: ui.publishing.ownerPhone,
         adminEmails: ui.publishing.adminEmails,
         approvedEmails: ui.publishing.approvedEmails,
         accessRequests: ui.publishing.accessRequests,
@@ -3253,6 +3257,30 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
       },
     }));
   };
+  const sendAlimtalkNotification = async (payload: {
+    type: 'approval_request' | 'approval_approved' | 'approval_rejected';
+    requesterEmail: string;
+    ownerEmail: string;
+    ownerPhone: string;
+    requestedAt?: string;
+    resolvedAt?: string;
+    note?: string;
+  }) => {
+    if (!alimtalkWebhookUrl) return { sent: false, reason: 'webhook_missing' };
+    try {
+      const res = await fetch(alimtalkWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        return { sent: false, reason: `http_${res.status}` };
+      }
+      return { sent: true, reason: 'ok' };
+    } catch {
+      return { sent: false, reason: 'network_error' };
+    }
+  };
   const publishReadiness = useMemo(() => {
     const checks = [
       { key: 'approved', label: '발행 승인', ok: Boolean(isApprovedUser), hint: '관리자 승인(approved)이 필요합니다.' },
@@ -3298,10 +3326,6 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
   };
 
   const connectYouTubeAccount = () => {
-    if (!isApprovedUser) {
-      alert('승인된 사용자만 YouTube 연동이 가능합니다. 관리자에게 승인 요청을 보내주세요.');
-      return;
-    }
     if (!googleClientId) {
       alert('Google 로그인 설정 누락: VITE_GOOGLE_CLIENT_ID가 배포 환경에 설정되지 않았습니다. 관리자에게 설정을 요청해 주세요.');
       return;
@@ -3445,17 +3469,18 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
     appendAuditLog('APPROVED_REMOVE', normalized, '승인 사용자 제거');
   };
 
-  const requestApprovalByEmail = () => {
+  const requestApprovalByEmail = async () => {
     if (!currentUserEmail) {
       alert('먼저 Google 로그인 후 다시 시도해 주세요.');
       return;
     }
+    const requestedAt = new Date().toISOString();
     const receiver = normalizeEmail(ui.publishing.ownerEmail || '') || ROOT_ADMIN_EMAIL;
     const requestEntry = {
       id: `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       email: currentUserEmail,
       status: 'pending' as const,
-      requestedAt: new Date().toISOString(),
+      requestedAt,
       resolvedAt: '',
       note: '',
     };
@@ -3463,10 +3488,18 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
       ...prev,
       publishing: {
         ...prev.publishing,
-        accessRequests: [requestEntry, ...(prev.publishing.accessRequests || []).filter((req: any) => !(normalizeEmail(req.email) === currentUserEmail && req.status === 'pending'))].slice(0, 300),
+        accessRequests: [{ ...requestEntry, requestedAt }, ...(prev.publishing.accessRequests || []).filter((req: any) => !(normalizeEmail(req.email) === currentUserEmail && req.status === 'pending'))].slice(0, 300),
       },
     }));
     appendAuditLog('APPROVAL_REQUEST', currentUserEmail, `승인 요청 메일 대상: ${receiver}`);
+    const notifyResult = await sendAlimtalkNotification({
+      type: 'approval_request',
+      requesterEmail: currentUserEmail,
+      ownerEmail: receiver,
+      ownerPhone: String(ui.publishing.ownerPhone || ''),
+      requestedAt,
+      note: '다운로드/유튜브 연동/발행 권한 승인 요청',
+    });
     const subject = encodeURIComponent('[AI Storyteller] 사용자 승인 요청');
     const body = encodeURIComponent([
       '안녕하세요 관리자님,',
@@ -3478,15 +3511,22 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
       '승인 후 관리자 페이지에서 approved 사용자 목록에 추가해 주세요.',
     ].join('\n'));
     window.open(`mailto:${receiver}?subject=${subject}&body=${body}`, '_blank');
+    if (notifyResult.sent) {
+      alert('승인 요청이 접수되었습니다. 관리자에게 이메일 + 카카오 알림톡으로 전달했습니다.');
+    } else {
+      alert('승인 요청 메일을 열었습니다. (카카오 알림톡은 아직 미연동 또는 전송 실패)');
+    }
   };
 
   const approveAccessRequest = (requestId: string) => {
     if (!isPublishAdmin) return;
     let targetEmail = '';
+    let resolvedAt = '';
     setUi(prev => {
       const target = (prev.publishing.accessRequests || []).find((req: any) => req.id === requestId);
       targetEmail = normalizeEmail(target?.email || '');
       if (!targetEmail) return prev;
+      resolvedAt = new Date().toISOString();
       return {
         ...prev,
         publishing: {
@@ -3494,34 +3534,56 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
           approvedEmails: Array.from(new Set([...(prev.publishing.approvedEmails || []).map(normalizeEmail), targetEmail])),
           accessRequests: (prev.publishing.accessRequests || []).map((req: any) =>
             req.id === requestId
-              ? { ...req, status: 'approved', resolvedAt: new Date().toISOString(), note: '관리자 승인' }
+              ? { ...req, status: 'approved', resolvedAt, note: '관리자 승인' }
               : req,
           ),
         },
       };
     });
-    if (targetEmail) appendAuditLog('REQUEST_APPROVE', targetEmail, '접근 요청 승인');
+    if (targetEmail) {
+      appendAuditLog('REQUEST_APPROVE', targetEmail, '접근 요청 승인');
+      void sendAlimtalkNotification({
+        type: 'approval_approved',
+        requesterEmail: targetEmail,
+        ownerEmail: normalizeEmail(ui.publishing.ownerEmail || '') || ROOT_ADMIN_EMAIL,
+        ownerPhone: String(ui.publishing.ownerPhone || ''),
+        resolvedAt,
+        note: '관리자가 요청을 승인했습니다.',
+      });
+    }
   };
 
   const rejectAccessRequest = (requestId: string) => {
     if (!isPublishAdmin) return;
     let targetEmail = '';
+    let resolvedAt = '';
     setUi(prev => {
       const target = (prev.publishing.accessRequests || []).find((req: any) => req.id === requestId);
       targetEmail = normalizeEmail(target?.email || '');
+      resolvedAt = new Date().toISOString();
       return {
         ...prev,
         publishing: {
           ...prev.publishing,
           accessRequests: (prev.publishing.accessRequests || []).map((req: any) =>
             req.id === requestId
-              ? { ...req, status: 'rejected', resolvedAt: new Date().toISOString(), note: '관리자 반려' }
+              ? { ...req, status: 'rejected', resolvedAt, note: '관리자 반려' }
               : req,
           ),
         },
       };
     });
-    if (targetEmail) appendAuditLog('REQUEST_REJECT', targetEmail, '접근 요청 반려');
+    if (targetEmail) {
+      appendAuditLog('REQUEST_REJECT', targetEmail, '접근 요청 반려');
+      void sendAlimtalkNotification({
+        type: 'approval_rejected',
+        requesterEmail: targetEmail,
+        ownerEmail: normalizeEmail(ui.publishing.ownerEmail || '') || ROOT_ADMIN_EMAIL,
+        ownerPhone: String(ui.publishing.ownerPhone || ''),
+        resolvedAt,
+        note: '관리자가 요청을 반려했습니다.',
+      });
+    }
   };
 
   const rewriteTemplateTitleFromHook = async () => {
@@ -4996,6 +5058,26 @@ ${JSON.stringify(cutPayload)}`,
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-full border border-white/10 bg-white/5">
+            <span className={`w-2 h-2 rounded-full ${hasValidYouTubeAuth ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+            <span className="text-[11px] font-bold text-slate-200">{currentUserEmail || '로그인 안됨'}</span>
+            {hasValidYouTubeAuth ? (
+              <button
+                onClick={disconnectYouTubeAccount}
+                className="text-[10px] px-2 py-1 rounded-md bg-white/10 hover:bg-white/20"
+              >
+                로그아웃
+              </button>
+            ) : (
+              <button
+                onClick={connectYouTubeAccount}
+                disabled={!googleLoginReady}
+                className="text-[10px] px-2 py-1 rounded-md bg-cyan-500 text-black font-black disabled:opacity-40"
+              >
+                로그인
+              </button>
+            )}
+          </div>
           <button
             onClick={handleNewProject}
             className="flex items-center gap-2 bg-cyan-500/20 border border-cyan-300/30 text-cyan-100 px-5 py-2.5 rounded-full hover:bg-cyan-500/30 transition-all"
@@ -6431,10 +6513,10 @@ ${JSON.stringify(cutPayload)}`,
                         <div className="flex flex-col gap-2">
                           <button
                             onClick={connectYouTubeAccount}
-                            disabled={!isApprovedUser}
+                            disabled={!googleLoginReady}
                             className={`px-3 py-2 rounded-lg text-xs font-black transition-all ${ui.publishing.accounts[0]?.connected ? 'bg-emerald-400 text-black' : 'bg-red-500 text-white hover:bg-red-400'}`}
                           >
-                            {!isApprovedUser ? '승인 필요' : ui.publishing.accounts[0]?.connected ? '재연결' : '연결하기'}
+                            {ui.publishing.accounts[0]?.connected ? '재연결' : '로그인/연결'}
                           </button>
                           {ui.publishing.accounts[0]?.connected && (
                             <button
@@ -6456,6 +6538,19 @@ ${JSON.stringify(cutPayload)}`,
                         </div>
                         <p className="text-[10px] text-amber-100/90">현재 로그인 이메일: {currentUserEmail || '미확인'}</p>
                         <p className="text-[10px] text-amber-100/90">소유자(owner): {ui.publishing.ownerEmail || '미설정'}</p>
+                        {isPublishAdmin && (
+                          <div className="space-y-1">
+                            <label className="text-[10px] text-amber-100/90">알림톡 수신번호(관리자)</label>
+                            <input
+                              value={ui.publishing.ownerPhone || ''}
+                              onChange={(e) => setUi(prev => ({ ...prev, publishing: { ...prev.publishing, ownerPhone: e.target.value } }))}
+                              placeholder="01012345678"
+                              className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px] outline-none"
+                            />
+                            <p className="text-[10px] text-slate-400">알림톡 웹훅 전송 시 관리자 수신번호로 전달됩니다.</p>
+                          </div>
+                        )}
+                        {!googleLoginReady && <p className="text-[10px] text-rose-300">OAuth 환경변수가 설정되지 않아 로그인/연결 버튼이 비활성화되었습니다.</p>}
                         {!isApprovedUser && currentUserEmail && (
                           <button
                             onClick={requestApprovalByEmail}
