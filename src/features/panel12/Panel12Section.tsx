@@ -46,6 +46,70 @@ type Props = {
   };
 };
 
+const InlineSmoothRange = React.memo(({
+  min,
+  max,
+  step,
+  value,
+  onChange,
+  className,
+  disabled,
+}: {
+  min: number;
+  max: number;
+  step?: number;
+  value: number;
+  onChange: (v: number) => void;
+  className?: string;
+  disabled?: boolean;
+}) => {
+  const ref = React.useRef<HTMLInputElement | null>(null);
+  const rafRef = React.useRef<number>(0);
+  const draggingRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!ref.current || draggingRef.current) return;
+    const dom = Number(ref.current.value);
+    if (Math.abs(dom - value) > 0.0001) {
+      ref.current.value = String(value);
+    }
+  }, [value]);
+
+  const schedule = (v: number) => {
+    window.cancelAnimationFrame(rafRef.current);
+    rafRef.current = window.requestAnimationFrame(() => onChange(v));
+  };
+
+  return (
+    <input
+      ref={ref}
+      type="range"
+      min={min}
+      max={max}
+      step={step}
+      defaultValue={value}
+      className={className}
+      disabled={disabled}
+      style={{ touchAction: 'none' }}
+      onInput={(e) => schedule(Number((e.target as HTMLInputElement).value))}
+      onChange={() => undefined}
+      onPointerDown={() => {
+        draggingRef.current = true;
+      }}
+      onPointerUp={() => {
+        draggingRef.current = false;
+        if (!ref.current) return;
+        onChange(Number(ref.current.value));
+      }}
+      onLostPointerCapture={() => {
+        draggingRef.current = false;
+        if (!ref.current) return;
+        onChange(Number(ref.current.value));
+      }}
+    />
+  );
+});
+
 export default function Panel12Section(props: Props) {
   const {
     ui,
@@ -268,13 +332,12 @@ export default function Panel12Section(props: Props) {
                         <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">영상 생성 컷 수</label>
                         <span className="text-xs text-emerald-200 font-bold">{Math.max(0, Number(ui.finalVideo.hookVideoCount || 0))}컷</span>
                       </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max={String(maxHookVideoCount)}
-                        step="1"
+                      <InlineSmoothRange
+                        min={0}
+                        max={maxHookVideoCount}
+                        step={1}
                         value={Math.max(0, Math.min(maxHookVideoCount, Number(ui.finalVideo.hookVideoCount || 0)))}
-                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, hookVideoCount: Number(e.target.value) } }))}
+                        onChange={(v) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, hookVideoCount: Number(v) } }))}
                         className="w-full accent-emerald-300"
                       />
                       <p className="text-[10px] text-emerald-100/90">앞에서부터 지정한 컷 수만큼 업로드된 영상을 우선 배치하고, 나머지는 이미지 슬라이드로 렌더링합니다.</p>
@@ -284,13 +347,12 @@ export default function Panel12Section(props: Props) {
                     <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">컷당 재생 시간</label>
                     <span className="text-xs text-emerald-200 font-bold">{ui.finalVideo.slideDuration}초</span>
                   </div>
-                  <input
-                    type="range"
-                    min="2"
-                    max="8"
-                    step="1"
-                    value={ui.finalVideo.slideDuration}
-                    onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, slideDuration: Number(e.target.value) } }))}
+                  <InlineSmoothRange
+                    min={2}
+                    max={8}
+                    step={1}
+                    value={Number(ui.finalVideo.slideDuration || 3)}
+                    onChange={(v) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, slideDuration: Number(v) } }))}
                     className="w-full accent-emerald-400"
                   />
                   <div className="flex items-center justify-between gap-3 pt-1">
@@ -362,13 +424,12 @@ export default function Panel12Section(props: Props) {
                         <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">BGM 볼륨</label>
                         <span className="text-[10px] text-emerald-100 font-bold">{ui.finalVideo.bgmVolume}%</span>
                       </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        step="1"
-                        value={ui.finalVideo.bgmVolume}
-                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, bgmVolume: Number(e.target.value) } }))}
+                      <InlineSmoothRange
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={Number(ui.finalVideo.bgmVolume || 0)}
+                        onChange={(v) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, bgmVolume: Number(v) } }))}
                         className="w-full accent-emerald-300"
                       />
                       <div className="flex items-center justify-between gap-3">
@@ -386,13 +447,12 @@ export default function Panel12Section(props: Props) {
                             <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">덕킹 강도</label>
                             <span className="text-[10px] text-emerald-100 font-bold">-{ui.finalVideo.bgmDuckingDb} dB</span>
                           </div>
-                          <input
-                            type="range"
-                            min="3"
-                            max="18"
-                            step="1"
-                            value={ui.finalVideo.bgmDuckingDb}
-                            onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, bgmDuckingDb: Number(e.target.value) } }))}
+                          <InlineSmoothRange
+                            min={3}
+                            max={18}
+                            step={1}
+                            value={Number(ui.finalVideo.bgmDuckingDb || 3)}
+                            onChange={(v) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, bgmDuckingDb: Number(v) } }))}
                             className="w-full accent-emerald-300"
                           />
                         </>
@@ -448,13 +508,12 @@ export default function Panel12Section(props: Props) {
                         <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">SFX 볼륨</label>
                         <span className="text-[10px] text-emerald-100 font-bold">{ui.finalVideo.sfxVolume}%</span>
                       </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        step="1"
-                        value={ui.finalVideo.sfxVolume}
-                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxVolume: Number(e.target.value) } }))}
+                      <InlineSmoothRange
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={Number(ui.finalVideo.sfxVolume || 0)}
+                        onChange={(v) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxVolume: Number(v) } }))}
                         className="w-full accent-emerald-300"
                       />
                       <div className="flex items-center justify-between gap-3">
@@ -691,13 +750,12 @@ export default function Panel12Section(props: Props) {
                                 <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">제목 크기</label>
                                 <span className="text-[10px] text-emerald-100 font-bold">{ui.finalVideo.templateTitleScale.toFixed(2)}x</span>
                               </div>
-                              <input
-                                type="range"
-                                min="0.8"
-                                max="1.8"
-                                step="0.05"
-                                value={ui.finalVideo.templateTitleScale}
-                                onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleScale: Number(e.target.value) } }))}
+                              <InlineSmoothRange
+                                min={0.8}
+                                max={1.8}
+                                step={0.05}
+                                value={Number(ui.finalVideo.templateTitleScale || 1)}
+                                onChange={(v) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleScale: Number(v) } }))}
                                 className="w-full accent-emerald-300"
                               />
                             </>
@@ -742,13 +800,12 @@ export default function Panel12Section(props: Props) {
                         <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">줄당 글자수</label>
                         <span className="text-[10px] text-emerald-100 font-bold">{ui.finalVideo.subtitleMaxChars}자</span>
                       </div>
-                      <input
-                        type="range"
-                        min="14"
-                        max="34"
-                        step="1"
-                        value={ui.finalVideo.subtitleMaxChars}
-                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitleMaxChars: Number(e.target.value) } }))}
+                      <InlineSmoothRange
+                        min={14}
+                        max={34}
+                        step={1}
+                        value={Number(ui.finalVideo.subtitleMaxChars || 24)}
+                        onChange={(v) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitleMaxChars: Number(v) } }))}
                         className="w-full accent-emerald-300"
                       />
                       <div className="flex items-center justify-between gap-3 pt-1">

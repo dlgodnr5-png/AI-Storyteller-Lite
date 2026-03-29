@@ -15,6 +15,7 @@ import { LS_KEYS } from './types';
 import { AI_PROMPTS } from './prompts';
 import { CORE_GUIDELINES, SCRIPT_RULES } from './guidelines/rules';
 import Panel12Section from './features/panel12/Panel12Section';
+import ApiStatusBar from './components/ApiStatusBar';
 
 // --- Constants ---
 const GEMINI_TTS_MODELS = [
@@ -362,6 +363,40 @@ const createOAuthState = () => {
   return Array.from(bytes).map(v => v.toString(16).padStart(2, '0')).join('');
 };
 
+const GEMINI_TEXT_MODEL_CHAIN = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash-lite'] as const;
+
+const is429LikeError = (err: any) => {
+  const status = Number(err?.status || err?.code || 0);
+  const message = String(err?.message || '');
+  return status === 429 || /429|rate.?limit|quota/i.test(message);
+};
+
+const shouldUseTextFallback = (model: string) => {
+  if (!model) return false;
+  if (model.includes('image') || model.includes('tts') || model.includes('veo') || model.includes('imagen')) return false;
+  return model.startsWith('gemini-2.5-flash') || model === 'gemini-2.0-flash-lite';
+};
+
+const generateContentWithFallback = async (ai: GoogleGenAI, request: any) => {
+  const model = String(request?.model || '');
+  if (!shouldUseTextFallback(model)) {
+    return ai.models.generateContent(request as any);
+  }
+
+  const chain = [model, ...GEMINI_TEXT_MODEL_CHAIN.filter(m => m !== model)];
+  let lastErr: any = null;
+  for (const m of chain) {
+    try {
+      return await ai.models.generateContent({ ...(request || {}), model: m } as any);
+    } catch (err: any) {
+      lastErr = err;
+      if (!is429LikeError(err)) throw err;
+      console.warn(`[gemini-fallback] ${m} failed with 429-like error, trying next model`);
+    }
+  }
+  throw lastErr || new Error('Gemini fallback failed');
+};
+
 const sfxLibraryByCategory = SFX_LIBRARY.reduce<Record<string, string[]>>((acc, item) => {
   const matched = item.path.match(/\/sound effects\/([^/]+)\//i);
   const category = matched?.[1] || '효과음';
@@ -465,10 +500,60 @@ const SUBTITLE_PRESETS: Record<SubtitlePreset, {
 const SUBTITLE_TEMPLATE_LS_KEY = 'ai_storyteller_subtitle_templates_v1';
 const SUBTITLE_TEMPLATE_PREVIEW_LS_KEY = 'ai_storyteller_subtitle_template_previews_v1';
 const PUBLISH_AUTOSAVE_LS_KEY = 'ai_storyteller_publish_draft_v1';
+const APP_DB_NAME = 'ai_storyteller_lite_db';
+const APP_DB_VERSION = 1;
+const APP_DB_STORE = 'kv';
 const YT_OAUTH_STATE_LS_KEY = 'ai_storyteller_yt_oauth_state_v1';
 const YT_AUTH_SESSION_LS_KEY = 'ai_storyteller_yt_auth_session_v1';
 const YT_OAUTH_MODE_LS_KEY = 'ai_storyteller_yt_oauth_mode_v1';
 const PUBLISH_RETRY_SCHEDULE_MS = [0, 10 * 60 * 1000, 60 * 60 * 1000];
+
+const openAppDB = () =>
+  new Promise<IDBDatabase>((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      reject(new Error('indexeddb_unavailable'));
+      return;
+    }
+    const req = indexedDB.open(APP_DB_NAME, APP_DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(APP_DB_STORE)) {
+        db.createObjectStore(APP_DB_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('indexeddb_open_failed'));
+  });
+
+const idbGetJson = async <T,>(key: string): Promise<T | null> => {
+  const db = await openAppDB();
+  try {
+    return await new Promise<T | null>((resolve, reject) => {
+      const tx = db.transaction(APP_DB_STORE, 'readonly');
+      const store = tx.objectStore(APP_DB_STORE);
+      const req = store.get(key);
+      req.onsuccess = () => resolve((req.result ?? null) as T | null);
+      req.onerror = () => reject(req.error || new Error('indexeddb_get_failed'));
+    });
+  } finally {
+    db.close();
+  }
+};
+
+const idbSetJson = async <T,>(key: string, value: T) => {
+  const db = await openAppDB();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(APP_DB_STORE, 'readwrite');
+      const store = tx.objectStore(APP_DB_STORE);
+      store.put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error('indexeddb_put_failed'));
+    });
+  } finally {
+    db.close();
+  }
+};
 
 const SOCIAL_PLATFORM_META: Array<{ id: PublishPlatform; label: string; color: string; available: boolean }> = [
   { id: 'youtube', label: 'YouTube', color: 'from-red-500 to-rose-500', available: true },
@@ -1289,6 +1374,101 @@ const drawVideoFrameToCanvas = (
   ctx.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height);
 };
 
+const InlineLockedSection = ({
+  locked,
+  title,
+  description,
+  onOpenSettings,
+  children,
+}: {
+  locked: boolean;
+  title: string;
+  description: string;
+  onOpenSettings: () => void;
+  children: React.ReactNode;
+}) => {
+  if (!locked) return <>{children}</>;
+  return (
+    <div className="relative rounded-2xl overflow-hidden border border-amber-300/20 bg-black/30">
+      <div className="opacity-30 pointer-events-none select-none blur-[0.4px]">{children}</div>
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/70 px-4 text-center">
+        <p className="text-xs font-black text-amber-200 uppercase tracking-widest">{title}</p>
+        <p className="text-[11px] text-slate-300 max-w-md">{description}</p>
+        <button
+          onClick={onOpenSettings}
+          className="px-3 py-2 rounded-lg text-xs font-black bg-amber-400 text-black hover:bg-amber-300"
+        >
+          API 설정 열기
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const InlineSmoothRange = React.memo(({
+  min,
+  max,
+  step,
+  value,
+  onChange,
+  className,
+  disabled,
+}: {
+  min: number;
+  max: number;
+  step?: number;
+  value: number;
+  onChange: (v: number) => void;
+  className?: string;
+  disabled?: boolean;
+}) => {
+  const ref = React.useRef<HTMLInputElement | null>(null);
+  const rafRef = React.useRef<number>(0);
+  const draggingRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!ref.current || draggingRef.current) return;
+    const dom = Number(ref.current.value);
+    if (Math.abs(dom - value) > 0.0001) {
+      ref.current.value = String(value);
+    }
+  }, [value]);
+
+  const commit = (v: number) => {
+    window.cancelAnimationFrame(rafRef.current);
+    rafRef.current = window.requestAnimationFrame(() => onChange(v));
+  };
+
+  return (
+    <input
+      ref={ref}
+      type="range"
+      min={min}
+      max={max}
+      step={step}
+      defaultValue={value}
+      disabled={disabled}
+      className={className}
+      style={{ touchAction: 'none' }}
+      onInput={(e) => commit(Number((e.target as HTMLInputElement).value))}
+      onChange={() => undefined}
+      onPointerDown={() => {
+        draggingRef.current = true;
+      }}
+      onPointerUp={() => {
+        draggingRef.current = false;
+        if (!ref.current) return;
+        onChange(Number(ref.current.value));
+      }}
+      onLostPointerCapture={() => {
+        draggingRef.current = false;
+        if (!ref.current) return;
+        onChange(Number(ref.current.value));
+      }}
+    />
+  );
+});
+
 export default function App() {
   // --- State ---
   const [keys, setKeys] = useState({ yt1: '', yt2: '', g1: '' });
@@ -1518,7 +1698,6 @@ export default function App() {
   const [previewingId, setPreviewingId] = useState<string | null>(null);
   const publishRetryTimersRef = useRef<Record<string, number[]>>({});
   const [youtubeAuth, setYoutubeAuth] = useState<YouTubeAuthSession | null>(null);
-  const [bypassLoginGate, setBypassLoginGate] = useState(false);
   const latestUiRef = useRef<any>(ui);
   const autoFlowLockRef = useRef(false);
   const actionApiRef = useRef<any>({});
@@ -1535,7 +1714,7 @@ export default function App() {
   const hasValidYouTubeAuth = Boolean(youtubeAuth?.accessToken && youtubeAuth.expiresAt > Date.now());
   const googleLoginReady = Boolean(googleClientId && googleRedirectUri);
   const isOAuthCallbackPath = window.location.pathname.includes('/oauth/google/callback');
-  const shouldShowLoginGate = requireGoogleLogin && !hasValidYouTubeAuth && !isOAuthCallbackPath && !bypassLoginGate;
+  const shouldShowLoginGate = requireGoogleLogin && !hasValidYouTubeAuth && !isOAuthCallbackPath;
   const envAdminEmails = useMemo(
     () => String(env.VITE_ADMIN_EMAILS || '').split(',').map(normalizeEmail).filter(Boolean),
     [env.VITE_ADMIN_EMAILS],
@@ -1559,6 +1738,14 @@ export default function App() {
     return Array.from(new Set(list));
   }, [ui.publishing.approvedEmails, effectiveAdminEmails]);
   const isApprovedUser = Boolean(currentUserEmail && effectiveApprovedEmails.includes(currentUserEmail));
+  const hasGeminiKey = Boolean((keys.g1 || '').trim());
+  const hasYouTubeApiKey = Boolean((keys[activeKeys.yt as keyof typeof keys] || '').trim());
+  const apiStatusItems = useMemo(() => ([
+    { key: 'google', label: 'Google 로그인', on: hasValidYouTubeAuth, colorOn: 'bg-cyan-400' },
+    { key: 'gemini', label: 'Gemini API', on: hasGeminiKey, colorOn: 'bg-blue-400' },
+    { key: 'youtube', label: 'YouTube API', on: hasYouTubeApiKey, colorOn: 'bg-red-400' },
+    { key: 'approved', label: '승인 권한', on: isApprovedUser, colorOn: 'bg-emerald-400' },
+  ]), [hasValidYouTubeAuth, hasGeminiKey, hasYouTubeApiKey, isApprovedUser]);
   const scriptMetrics = useMemo(
     () => buildScriptMetrics(ui.script.output || '', (['KR', 'EN', 'JP'].includes(ui.script.lang) ? ui.script.lang : 'KR') as 'KR' | 'EN' | 'JP'),
     [ui.script.output, ui.script.lang],
@@ -1693,12 +1880,9 @@ export default function App() {
   }, [templatePreviewOverrides]);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(PUBLISH_AUTOSAVE_LS_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') return;
-
+    let cancelled = false;
+    const applyAutosave = (parsed: any) => {
+      if (!parsed || typeof parsed !== 'object' || cancelled) return;
       setUi(prev => ({
         ...prev,
         publishing: {
@@ -1720,29 +1904,56 @@ export default function App() {
           accounts: Array.isArray(parsed.accounts) ? parsed.accounts : prev.publishing.accounts,
         },
       }));
-    } catch {
-      // ignore corrupted autosave
-    }
+    };
+
+    (async () => {
+      try {
+        const saved = await idbGetJson<any>(PUBLISH_AUTOSAVE_LS_KEY);
+        if (saved) {
+          applyAutosave(saved);
+          return;
+        }
+      } catch {
+        // fallback to localStorage
+      }
+
+      try {
+        const raw = localStorage.getItem(PUBLISH_AUTOSAVE_LS_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        applyAutosave(parsed);
+        try {
+          await idbSetJson(PUBLISH_AUTOSAVE_LS_KEY, parsed);
+        } catch {
+          // keep localStorage fallback
+        }
+      } catch {
+        // ignore corrupted autosave
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(
-      PUBLISH_AUTOSAVE_LS_KEY,
-      JSON.stringify({
-        notifyEmail: ui.publishing.notifyEmail,
-        mobileStep: ui.publishing.mobileStep,
-        ownerEmail: ui.publishing.ownerEmail,
-        ownerPhone: ui.publishing.ownerPhone,
-        adminEmails: ui.publishing.adminEmails,
-        approvedEmails: ui.publishing.approvedEmails,
-        accessRequests: ui.publishing.accessRequests,
-        auditLogs: ui.publishing.auditLogs,
-        channelInsights: ui.publishing.channelInsights,
-        draft: ui.publishing.draft,
-        jobs: ui.publishing.jobs,
-        accounts: ui.publishing.accounts,
-      }),
-    );
+    const payload = {
+      notifyEmail: ui.publishing.notifyEmail,
+      mobileStep: ui.publishing.mobileStep,
+      ownerEmail: ui.publishing.ownerEmail,
+      ownerPhone: ui.publishing.ownerPhone,
+      adminEmails: ui.publishing.adminEmails,
+      approvedEmails: ui.publishing.approvedEmails,
+      accessRequests: ui.publishing.accessRequests,
+      auditLogs: ui.publishing.auditLogs,
+      channelInsights: ui.publishing.channelInsights,
+      draft: ui.publishing.draft,
+      jobs: ui.publishing.jobs,
+      accounts: ui.publishing.accounts,
+    };
+    localStorage.setItem(PUBLISH_AUTOSAVE_LS_KEY, JSON.stringify(payload));
+    void idbSetJson(PUBLISH_AUTOSAVE_LS_KEY, payload).catch(() => undefined);
   }, [ui.publishing]);
 
   useEffect(() => {
@@ -1997,7 +2208,7 @@ export default function App() {
         "overallStrategy": "전체적인 바이럴 전략 분석 내용"
       }`;
       
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithFallback(ai, {
         model: "gemini-3-flash-preview",
         contents: prompt,
         config: { responseMimeType: "application/json" }
@@ -2034,7 +2245,7 @@ export default function App() {
       const scriptLang = ui.script.lang === 'KR' ? '한국어' : ui.script.lang === 'EN' ? '영어' : '일본어';
       
       // 1. Generate Visual Prompt
-      const promptRes = await ai.models.generateContent({
+      const promptRes = await generateContentWithFallback(ai, {
         model: "gemini-3-flash-preview",
         contents: `유튜브 썸네일 전문가로서 다음 정보를 바탕으로 강렬하고 클릭을 유도하는 썸네일 이미지 생성을 위한 상세한 영어 프롬프트를 작성하세요.
         
@@ -2061,7 +2272,7 @@ ${stylePrompt}
       }
 
       // 2. Generate Image
-      const imageRes = await ai.models.generateContent({
+      const imageRes = await generateContentWithFallback(ai, {
         model: ui.thumbnail.model,
         contents: { parts: [{ text: `${visualPrompt}. Aspect Ratio: ${ui.thumbnail.ratio}. Style: ${stylePrompt}` }] },
         config: { imageConfig: { aspectRatio: ui.thumbnail.ratio as any } }
@@ -2131,7 +2342,7 @@ JSON 형식으로만 출력하세요:
   "jp": {"title": "...", "desc": "...", "hashtags": "...", "tags": "..."}
 }`;
       
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithFallback(ai, {
         model: "gemini-3-flash-preview",
         contents: prompt,
         config: { responseMimeType: "application/json" }
@@ -2212,7 +2423,7 @@ ${ui.selectedHookTitle}
 불필요한 설명 없이 대본 내용만 출력하세요.
 `;
       
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithFallback(ai, {
         model: "gemini-3-flash-preview",
         contents: prompt
       });
@@ -2281,7 +2492,7 @@ ${ui.selectedHookTitle}
         }
 
         const ai = new GoogleGenAI({ apiKey: keys.g1 });
-        const previewResponse = await ai.models.generateContent({
+        const previewResponse = await generateContentWithFallback(ai, {
           model: ui.tts.model || 'gemini-2.5-flash-preview-tts',
           contents: [{ parts: [{ text: '안녕하세요. AI Storyteller Lite 음성 미리듣기 샘플입니다.' }] }],
           config: {
@@ -2361,7 +2572,7 @@ ${ui.selectedHookTitle}
     if (!keys.g1 || !ui.script.output) return;
     try {
       const ai = new GoogleGenAI({ apiKey: keys.g1 });
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithFallback(ai, {
         model: 'gemini-3-flash-preview',
         contents: `[TASK] 아래 대본 내용을 분석하여, 가장 잘 어울리는 TTS 낭독 스타일(Style Instructions)을 한글 한 문장으로 작성하세요.
 대본일부: ${ui.script.output.substring(0, 300)}...
@@ -2445,7 +2656,7 @@ ${ui.selectedHookTitle}
         ? `[Style: ${ui.tts.styleInstructions}]\n${cleanScript}`
         : cleanScript;
 
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithFallback(ai, {
         model: ui.tts.model || "gemini-2.5-flash-preview-tts",
         contents: [{ parts: [{ text: promptText }] }],
         config: {
@@ -2839,7 +3050,7 @@ ${ui.selectedHookTitle}
         .slice(0, 6)
         .map((r: any, i: number) => `${i + 1}) ${r.title} | 조회수 ${formatNumber(Number(r.viewCount || 0))}`)
         .join('\n');
-      const analysis = await ai.models.generateContent({
+      const analysis = await generateContentWithFallback(ai, {
         model: 'gemini-2.5-pro',
         contents: [
           {
@@ -3049,7 +3260,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
 5. 불필요한 설명 없이 1~2문장의 영어 프롬프트만 출력하세요.`;
 
         try {
-          const res = await ai.models.generateContent({
+          const res = await generateContentWithFallback(ai, {
             model: "gemini-3-flash-preview",
             contents: p
           });
@@ -3342,11 +3553,15 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
       return;
     }
     if (!googleClientId) {
-      alert('Google 로그인 설정 누락: VITE_GOOGLE_CLIENT_ID가 배포 환경에 설정되지 않았습니다. 관리자에게 설정을 요청해 주세요.');
+      alert(isPublishAdmin
+        ? 'Google 로그인 설정 누락: VITE_GOOGLE_CLIENT_ID를 배포 환경변수에 설정해 주세요.'
+        : 'Google 로그인 준비 중입니다. 잠시 후 다시 시도하거나 관리자에게 문의해 주세요.');
       return;
     }
     if (!googleRedirectUri) {
-      alert('Google 로그인 설정 누락: VITE_GOOGLE_REDIRECT_URI가 배포 환경에 설정되지 않았습니다. 관리자에게 설정을 요청해 주세요.');
+      alert(isPublishAdmin
+        ? 'Google 로그인 설정 누락: VITE_GOOGLE_REDIRECT_URI를 배포 환경변수에 설정해 주세요.'
+        : 'Google 로그인 준비 중입니다. 잠시 후 다시 시도하거나 관리자에게 문의해 주세요.');
       return;
     }
 
@@ -3632,7 +3847,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
     try {
       const ai = new GoogleGenAI({ apiKey: keys.g1 });
       const prompt = `다음 원본 제목을 쇼츠 훅 문장으로 재작성하세요.\n원본: ${ui.selectedHookTitle}\n\n규칙:\n1) 전체 최대 20자\n2) 최대 2줄, 각 줄 최대 10자\n3) 과장/낚시 금지, 강한 훅 유지\n4) 출력 JSON만: {"title":"...","highlight":"..."}`;
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithFallback(ai, {
         model: 'gemini-2.5-pro',
         contents: prompt,
         config: { responseMimeType: 'application/json' },
@@ -3949,7 +4164,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
       const ai = new GoogleGenAI({ apiKey: keys.g1 });
       const stylePrompt = resolveSelectedVideoStyle(ui.videoStyle.selected)?.prompt || '';
       
-      const res = await ai.models.generateContent({
+      const res = await generateContentWithFallback(ai, {
         model: 'gemini-3.1-flash-image-preview',
         contents: { parts: [{ text: `${promptObj.prompt}. Style: ${stylePrompt}` }] },
         config: { imageConfig: { aspectRatio: ui.cuts.ratio as any } }
@@ -4713,6 +4928,10 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
   };
 
   const exportSubtitleTemplates = () => {
+    if (!isApprovedUser) {
+      alert('승인된 사용자만 템플릿 파일 다운로드가 가능합니다.');
+      return;
+    }
     if (subtitleTemplates.length === 0) {
       alert('내보낼 템플릿이 없습니다. 먼저 템플릿을 저장하세요.');
       return;
@@ -4797,7 +5016,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
             text: (ui.cuts.items[slide.cut - 1] || '').slice(0, 280),
           }));
 
-          const response = await ai.models.generateContent({
+          const response = await generateContentWithFallback(ai, {
             model: 'gemini-3-flash-preview',
             contents: `아래 컷별 텍스트에서 자막 강조 키워드를 추출하세요.
 규칙:
@@ -4851,7 +5070,7 @@ ${JSON.stringify(cutPayload)}`,
 
       if (keys.g1) {
         const ai = new GoogleGenAI({ apiKey: keys.g1 });
-        const response = await ai.models.generateContent({
+        const response = await generateContentWithFallback(ai, {
           model: 'gemini-3-flash-preview',
           contents: `아래 영상 대본에서 자막 강조용 핵심 키워드 6개를 추출하세요.\n조건: 중복 없이, 짧고 강한 단어, 쉼표(,)로만 출력.\n\n대본:\n${sourceText.substring(0, 2400)}`,
         });
@@ -5037,7 +5256,12 @@ ${JSON.stringify(cutPayload)}`,
               </p>
               {!googleLoginReady && (
                 <p className="text-sm text-rose-300 font-bold">
-                  관리자 설정 필요: `VITE_GOOGLE_CLIENT_ID` 또는 `VITE_GOOGLE_REDIRECT_URI` 누락
+                  Google 로그인 준비 중입니다. 잠시 후 다시 시도하거나 관리자에게 문의해 주세요.
+                </p>
+              )}
+              {!googleLoginReady && isPublishAdmin && (
+                <p className="text-[11px] text-amber-200/90">
+                  관리자 참고: `VITE_GOOGLE_CLIENT_ID` / `VITE_GOOGLE_REDIRECT_URI` 배포 환경변수를 확인해 주세요.
                 </p>
               )}
               <div className="flex flex-wrap gap-2">
@@ -5047,19 +5271,8 @@ ${JSON.stringify(cutPayload)}`,
                 >
                   Google로 시작하기
                 </button>
-                {!googleLoginReady && (
-                  <button
-                    onClick={() => setBypassLoginGate(true)}
-                    className="px-4 py-2.5 rounded-xl bg-amber-400 text-black font-black"
-                  >
-                    읽기 전용으로 계속
-                  </button>
-                )}
               </div>
-              <p className="text-[11px] text-slate-300/90">일반 사용자는 API 키를 입력할 필요가 없습니다. 서비스 운영자가 관리자 설정에서만 관리합니다.</p>
-              {!googleLoginReady && (
-                <p className="text-[11px] text-amber-100/90">읽기 전용은 화면 확인/편집만 허용하며 다운로드·유튜브 연동·발행은 승인 전까지 차단됩니다.</p>
-              )}
+              <p className="text-[11px] text-slate-300/90">로그인 후 API를 입력해 대부분 기능을 사용할 수 있습니다. 저장/다운로드/유튜브 연동/발행은 승인 사용자만 가능합니다.</p>
             </div>
           </section>
         </div>
@@ -5075,6 +5288,7 @@ ${JSON.stringify(cutPayload)}`,
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <ApiStatusBar items={apiStatusItems} />
           <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-full border border-white/10 bg-white/5">
             <span className={`w-2 h-2 rounded-full ${hasValidYouTubeAuth ? 'bg-emerald-400' : 'bg-slate-500'}`} />
             <span className="text-[11px] font-bold text-slate-200">{currentUserEmail || '로그인 안됨'}</span>
@@ -5123,15 +5337,13 @@ ${JSON.stringify(cutPayload)}`,
               ZIP 또는 JSON 프로젝트를 불러올 수 있습니다. ZIP은 내부 project.json을 자동 탐색합니다.
             </div>
           </label>
-          {isPublishAdmin && (
-            <button 
-              onClick={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
-              className="flex items-center gap-2 bg-white/5 border border-white/10 px-5 py-2.5 rounded-full hover:bg-white/10 transition-all"
-            >
-              <Settings className="w-4 h-4" />
-              <span className="text-sm font-bold">관리자 API 설정</span>
-            </button>
-          )}
+          <button 
+            onClick={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
+            className="flex items-center gap-2 bg-white/5 border border-white/10 px-5 py-2.5 rounded-full hover:bg-white/10 transition-all"
+          >
+            <Settings className="w-4 h-4" />
+            <span className="text-sm font-bold">API 설정</span>
+          </button>
         </div>
       </header>
 
@@ -5203,13 +5415,12 @@ ${JSON.stringify(cutPayload)}`,
               <span>총 컷 수</span>
               <span className="font-black text-white">{Math.max(3, Math.min(8, Number(ui.productPromo.targetCuts || 5)))}컷</span>
             </div>
-            <input
-              type="range"
-              min="3"
-              max="8"
-              step="1"
+            <InlineSmoothRange
+              min={3}
+              max={8}
+              step={1}
               value={Math.max(3, Math.min(8, Number(ui.productPromo.targetCuts || 5)))}
-              onChange={(e) => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, targetCuts: Number(e.target.value) } }))}
+              onChange={(v) => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, targetCuts: Number(v) } }))}
               className="w-full accent-fuchsia-400"
             />
           </div>
@@ -5219,14 +5430,13 @@ ${JSON.stringify(cutPayload)}`,
               <span>초반 영상</span>
               <span className="font-black text-white">{ui.productPromo.renderMode === 'image_slide' ? Math.max(0, Math.min(3, Number(ui.productPromo.hookVideoCount || 0))) : 0}컷</span>
             </div>
-            <input
-              type="range"
-              min="0"
-              max="3"
-              step="1"
+            <InlineSmoothRange
+              min={0}
+              max={3}
+              step={1}
               disabled={ui.productPromo.renderMode !== 'image_slide'}
               value={ui.productPromo.renderMode === 'image_slide' ? Math.max(0, Math.min(3, Number(ui.productPromo.hookVideoCount || 0))) : 0}
-              onChange={(e) => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, hookVideoCount: Number(e.target.value) } }))}
+              onChange={(v) => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, hookVideoCount: Number(v) } }))}
               className="w-full accent-fuchsia-400 disabled:opacity-40"
             />
             <p className="text-[10px] text-slate-500">권장: 2개 영상 + 3개 이미지(총 5컷)</p>
@@ -5371,6 +5581,12 @@ ${JSON.stringify(cutPayload)}`,
         <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl">
           <PanelHeader title="1. 유튜브 검색" id="p1" colorClass="gold-gradient-text" />
           {ui.panelsOpen.p1 && (
+            <InlineLockedSection
+              locked={!hasYouTubeApiKey}
+              title="YouTube API 키 필요"
+              description="유튜브 검색/분석 기능은 YouTube API 키가 필요합니다. API 설정에서 키를 입력하면 즉시 활성화됩니다."
+              onOpenSettings={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
+            >
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-4">
@@ -5469,13 +5685,12 @@ ${JSON.stringify(cutPayload)}`,
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-500 uppercase">최소 조회수 필터</label>
-                  <input 
-                    type="range"
-                    min="0"
-                    max="1000000"
-                    step="10000"
+                  <InlineSmoothRange
+                    min={0}
+                    max={1000000}
+                    step={10000}
                     value={ui.filters.minViews}
-                    onChange={(e) => setUi(prev => ({ ...prev, filters: { ...prev.filters, minViews: Number(e.target.value) } }))}
+                    onChange={(v) => setUi(prev => ({ ...prev, filters: { ...prev.filters, minViews: Number(v) } }))}
                     className="w-full accent-amber-500"
                   />
                   <div className="flex justify-between text-[10px] font-bold text-slate-500">
@@ -5494,6 +5709,7 @@ ${JSON.stringify(cutPayload)}`,
                 {ui.searching ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : '유튜브 검색 실행'}
               </button>
             </div>
+            </InlineLockedSection>
           )}
         </section>
 
@@ -5555,6 +5771,12 @@ ${JSON.stringify(cutPayload)}`,
         <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl">
           <PanelHeader title="3. 바이럴 훅킹 제목 30선 & 전략 분석" id="p3" colorClass="text-orange-400" />
           {ui.panelsOpen.p3 && (
+            <InlineLockedSection
+              locked={!hasGeminiKey}
+              title="Gemini API 키 필요"
+              description="훅 제목 생성/전략 분석은 Gemini API 키가 필요합니다. API 설정에서 Gemini 키를 입력해 주세요."
+              onOpenSettings={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
+            >
             <div className="space-y-8">
               <div className="bg-black/30 border border-white/10 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
@@ -5614,6 +5836,7 @@ ${JSON.stringify(cutPayload)}`,
                 </div>
               )}
             </div>
+            </InlineLockedSection>
           )}
         </section>
 
@@ -5621,6 +5844,12 @@ ${JSON.stringify(cutPayload)}`,
         <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl">
           <PanelHeader title="4. 쇼츠대본 / 롱폼대본 생성" id="p4" colorClass="text-blue-400" />
           {ui.panelsOpen.p4 && (
+            <InlineLockedSection
+              locked={!hasGeminiKey}
+              title="Gemini API 키 필요"
+              description="대본 생성은 Gemini API 키가 필요합니다. API 설정에서 Gemini 키를 입력해 주세요."
+              onOpenSettings={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
+            >
             <div className="space-y-6">
               <div className="space-y-1">
                 <p className="text-sm text-slate-400">선택한 제목과 검색 결과를 기반으로 대본을 생성합니다.</p>
@@ -5759,6 +5988,7 @@ ${JSON.stringify(cutPayload)}`,
                 </div>
               )}
             </div>
+            </InlineLockedSection>
           )}
         </section>
 
@@ -5969,6 +6199,12 @@ ${JSON.stringify(cutPayload)}`,
         <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl">
           <PanelHeader title="8. tts 생성" id="p7" colorClass="text-cyan-400" />
           {ui.panelsOpen.p7 && (
+            <InlineLockedSection
+              locked={!hasGeminiKey}
+              title="Gemini API 키 필요"
+              description="TTS 생성은 Gemini API 키가 필요합니다. API 설정에서 Gemini 키를 입력해 주세요."
+              onOpenSettings={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
+            >
             <div className="space-y-8">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-4">
@@ -6056,6 +6292,7 @@ ${JSON.stringify(cutPayload)}`,
                 </div>
               )}
             </div>
+            </InlineLockedSection>
           )}
         </section>
 
@@ -6063,6 +6300,12 @@ ${JSON.stringify(cutPayload)}`,
         <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl">
           <PanelHeader title="9. 이미지 프롬프트 생성(대본나누기)" id="p9" colorClass="text-cyan-400" />
           {ui.panelsOpen.p9 && (
+            <InlineLockedSection
+              locked={!hasGeminiKey}
+              title="Gemini API 키 필요"
+              description="프롬프트 생성은 Gemini API 키가 필요합니다. API 설정에서 Gemini 키를 입력해 주세요."
+              onOpenSettings={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
+            >
             <div className="space-y-6">
               <p className="text-xs text-slate-400">대본을 의미/단락 기준으로 컷 분할 후 프롬프트 생성</p>
               
@@ -6200,6 +6443,7 @@ ${JSON.stringify(cutPayload)}`,
                 </button>
               </div>
             </div>
+            </InlineLockedSection>
           )}
         </section>
 
@@ -6230,6 +6474,12 @@ ${JSON.stringify(cutPayload)}`,
         <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl">
           <PanelHeader title="11. 이미지 생성 패널" id="p11" colorClass="text-cyan-400" badge="9:16" />
           {ui.panelsOpen.p11 && (
+            <InlineLockedSection
+              locked={!hasGeminiKey}
+              title="Gemini API 키 필요"
+              description="이미지 생성은 Gemini API 키가 필요합니다. API 설정에서 Gemini 키를 입력해 주세요."
+              onOpenSettings={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
+            >
             <div className="space-y-6">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <p className="text-xs text-slate-400 max-w-md">컷을 클릭하면 대기열에 추가되며 순차적으로 이미지가 자동 생성됩니다. (안정성을 위해 컷당 20~25초 간격)</p>
@@ -6418,6 +6668,7 @@ ${JSON.stringify(cutPayload)}`,
                 </div>
               )}
             </div>
+            </InlineLockedSection>
           )}
         </section>
 
