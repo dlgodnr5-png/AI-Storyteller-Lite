@@ -2267,9 +2267,22 @@ ${ui.selectedHookTitle}
     const prompts = [...(latestUiRef.current?.cuts?.prompts || [])];
     for (const cut of prompts) {
       if (abortRef.current) break;
-      try {
-        await generateImage(cut.index);
-      } catch {
+      let ok = false;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (abortRef.current) break;
+        try {
+          await generateImage(cut.index);
+          const job = latestUiRef.current?.imageJobs?.find((j: any) => j.cut === cut.index);
+          if (job?.imageUrl) {
+            ok = true;
+            break;
+          }
+        } catch {
+          // retry below
+        }
+        await new Promise(r => setTimeout(r, 900));
+      }
+      if (!ok) {
         failCount += 1;
       }
       await new Promise(r => setTimeout(r, 1200));
@@ -2290,6 +2303,25 @@ ${ui.selectedHookTitle}
     }
     autoFlowLockRef.current = true;
 
+    const waitFor = async (predicate: () => boolean, timeoutMs = 45000, intervalMs = 300) => {
+      const started = Date.now();
+      while (Date.now() - started < timeoutMs) {
+        if (predicate()) return true;
+        await new Promise(r => setTimeout(r, intervalMs));
+      }
+      return false;
+    };
+
+    const withRetries = async (label: string, fn: () => Promise<void>, verify: () => boolean, attempts = 2) => {
+      for (let i = 0; i < attempts; i += 1) {
+        setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: `${label}${attempts > 1 ? ` (${i + 1}/${attempts})` : ''}` } }));
+        await fn();
+        const ok = await waitFor(verify, 50000, 350);
+        if (ok) return;
+      }
+      throw new Error(`${label} 실패`);
+    };
+
     setUi(prev => ({
       ...prev,
       selectedHookTitle: title,
@@ -2304,23 +2336,35 @@ ${ui.selectedHookTitle}
 
     try {
       await new Promise(r => setTimeout(r, 0));
-      await actionApiRef.current.generateScript();
-      if (!latestUiRef.current?.script?.output?.trim()) throw new Error('대본 생성 실패');
+      await withRetries(
+        '대본 생성',
+        () => actionApiRef.current.generateScript(),
+        () => Boolean(latestUiRef.current?.script?.output?.trim()),
+        2,
+      );
 
-      setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '템플릿 제목 정리' } }));
       await actionApiRef.current.rewriteTemplateTitleFromHook();
 
-      setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: 'TTS 생성' } }));
-      await actionApiRef.current.handleGenerateTTS();
-      if (!latestUiRef.current?.tts?.audioUrl) throw new Error('TTS 생성 실패');
+      await withRetries(
+        'TTS 생성',
+        () => actionApiRef.current.handleGenerateTTS(),
+        () => Boolean(latestUiRef.current?.tts?.audioUrl),
+        2,
+      );
 
-      setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '컷 분할' } }));
-      await actionApiRef.current.splitCuts();
-      if ((latestUiRef.current?.cuts?.items || []).length === 0) throw new Error('컷 분할 실패');
+      await withRetries(
+        '컷 분할',
+        () => actionApiRef.current.splitCuts(),
+        () => (latestUiRef.current?.cuts?.items || []).length > 0,
+        2,
+      );
 
-      setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '프롬프트 생성' } }));
-      await actionApiRef.current.generateImagePrompts();
-      if ((latestUiRef.current?.cuts?.prompts || []).length === 0) throw new Error('프롬프트 생성 실패');
+      await withRetries(
+        '프롬프트 생성',
+        () => actionApiRef.current.generateImagePrompts(),
+        () => (latestUiRef.current?.cuts?.prompts || []).length > 0,
+        2,
+      );
 
       setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '이미지 자동 생성' } }));
       const imageBatch = await runAutoImageBatch();
@@ -2332,12 +2376,19 @@ ${ui.selectedHookTitle}
         finalVideo: { ...prev.finalVideo, type: 'image_slide' },
       }));
       await new Promise(r => setTimeout(r, 0));
-      await actionApiRef.current.handleGenerateFinalVideo();
-      if ((latestUiRef.current?.finalVideo?.slides || []).length === 0) throw new Error('슬라이드 구성 실패');
+      await withRetries(
+        '슬라이드 구성',
+        () => actionApiRef.current.handleGenerateFinalVideo(),
+        () => (latestUiRef.current?.finalVideo?.slides || []).length > 0,
+        2,
+      );
 
-      setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '렌더링' } }));
-      await actionApiRef.current.handleExportSlideVideo();
-      if (!latestUiRef.current?.finalVideo?.url) throw new Error('영상 렌더링 실패');
+      await withRetries(
+        '렌더링',
+        () => actionApiRef.current.handleExportSlideVideo(),
+        () => Boolean(latestUiRef.current?.finalVideo?.url),
+        2,
+      );
 
       setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '설명/태그 생성' } }));
       await actionApiRef.current.generateDescription();
@@ -2363,9 +2414,7 @@ ${ui.selectedHookTitle}
 
   const selectHookTitle = (title: string) => {
     setUi(prev => ({ ...prev, selectedHookTitle: title }));
-    if (latestUiRef.current?.autoFlow?.enabled) {
-      void runOneClickFromTitle(title);
-    }
+    void runOneClickFromTitle(title);
   };
 
   const handleDownloadThumbnail = () => {
@@ -4266,12 +4315,9 @@ ${JSON.stringify(cutPayload)}`,
                   {ui.autoFlow.step && <p className="text-[11px] text-emerald-300 font-bold mt-1">진행 단계: {ui.autoFlow.step}</p>}
                   {ui.autoFlow.error && <p className="text-[11px] text-rose-300 font-bold mt-1">오류: {ui.autoFlow.error}</p>}
                 </div>
-                <button
-                  onClick={() => setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, enabled: !prev.autoFlow.enabled } }))}
-                  className={`px-4 py-2 rounded-xl text-xs font-black border transition-all ${ui.autoFlow.enabled ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-200 border-white/15'}`}
-                >
-                  {ui.autoFlow.enabled ? '원클릭 ON' : '원클릭 OFF'}
-                </button>
+                <span className="px-4 py-2 rounded-xl text-xs font-black border bg-emerald-400 text-black border-emerald-300">
+                  원클릭 고정 ON
+                </span>
               </div>
 
               <button 
