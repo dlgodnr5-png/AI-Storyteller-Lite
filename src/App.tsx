@@ -557,6 +557,55 @@ const compactCutsToMax = (items: string[], maxCount: number) => {
   return groups.filter(Boolean).slice(0, maxCount);
 };
 
+const splitCutNearMiddle = (text: string) => {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  if (clean.length < 18) return [clean];
+  const middle = Math.floor(clean.length / 2);
+  const searchWindow = Math.max(8, Math.floor(clean.length * 0.25));
+  const start = Math.max(4, middle - searchWindow);
+  const end = Math.min(clean.length - 4, middle + searchWindow);
+  const segment = clean.slice(start, end);
+  const punct = segment.search(/[.!?。！？,:;]\s|\s[-–]\s/);
+  if (punct >= 0) {
+    const splitAt = start + punct + 1;
+    return [clean.slice(0, splitAt).trim(), clean.slice(splitAt).trim()].filter(Boolean);
+  }
+  const leftSpace = clean.lastIndexOf(' ', middle);
+  const rightSpace = clean.indexOf(' ', middle);
+  let splitAt = -1;
+  if (leftSpace > start) splitAt = leftSpace;
+  if (splitAt < 0 && rightSpace > 0 && rightSpace < end) splitAt = rightSpace;
+  if (splitAt < 0) splitAt = middle;
+  return [clean.slice(0, splitAt).trim(), clean.slice(splitAt).trim()].filter(Boolean);
+};
+
+const rebalanceCutsToTarget = (items: string[], targetCount: number) => {
+  const target = Math.max(1, Math.floor(targetCount));
+  if (items.length === 0) return items;
+  if (items.length > target) {
+    return compactCutsToMax(items, target);
+  }
+  if (items.length === target) return items;
+
+  const next = [...items];
+  while (next.length < target) {
+    let longestIdx = -1;
+    let longestLen = 0;
+    next.forEach((cut, idx) => {
+      const len = cut.replace(/\s+/g, '').length;
+      if (len > longestLen) {
+        longestLen = len;
+        longestIdx = idx;
+      }
+    });
+    if (longestIdx < 0 || longestLen < 30) break;
+    const parts = splitCutNearMiddle(next[longestIdx]);
+    if (parts.length < 2) break;
+    next.splice(longestIdx, 1, parts[0], parts.slice(1).join(' ').trim());
+  }
+  return next;
+};
+
 const getRenderDimensions = (ratio: string, resolution: RenderResolution) => {
   const base = RATIO_DIMENSIONS[ratio] || RATIO_DIMENSIONS['9:16'];
   const preset = RESOLUTION_PRESETS.find(p => p.id === resolution) || RESOLUTION_PRESETS[1];
@@ -615,6 +664,29 @@ const loadVideoElement = (src: string) =>
       video.removeEventListener('error', onError);
     };
     video.addEventListener('loadeddata', onLoaded);
+    video.addEventListener('error', onError);
+    video.src = src;
+  });
+
+const probeVideoDuration = (src: string) =>
+  new Promise<number>((resolve, reject) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    const cleanup = () => {
+      video.removeEventListener('loadedmetadata', onLoaded);
+      video.removeEventListener('error', onError);
+      video.src = '';
+    };
+    const onLoaded = () => {
+      const duration = Number.isFinite(video.duration) ? Math.max(0, Number(video.duration)) : 0;
+      cleanup();
+      resolve(duration);
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error('video-duration-probe-failed'));
+    };
+    video.addEventListener('loadedmetadata', onLoaded);
     video.addEventListener('error', onError);
     video.src = src;
   });
@@ -1277,7 +1349,7 @@ export default function App() {
       modifications: '',
       generating: false,
       url: '',
-      slides: [] as Array<{ cut: number; imageUrl: string; motion: SlideMotionType; mediaType?: 'image' | 'video'; videoUrl?: string }>,
+      slides: [] as Array<{ cut: number; imageUrl: string; motion: SlideMotionType; mediaType?: 'image' | 'video'; videoUrl?: string; videoDurationSec?: number }>,
       activeSlide: 0,
       slideDuration: 3,
       resolution: 'hd' as RenderResolution,
@@ -1436,15 +1508,28 @@ export default function App() {
   const timingSummary = useMemo(() => {
     const scriptSec = scriptMetrics.sec1x;
     const ttsSec = Number(ui.tts.measuredDuration || 0);
-    const cutsSec = (ui.cuts.items?.length || 0) * Math.max(1, Number(ui.finalVideo.slideDuration || 3));
+    const fallbackSlideDuration = Math.max(1, Number(ui.finalVideo.slideDuration || 3));
+    const cutsSec = ui.finalVideo.slides.length > 0
+      ? ui.finalVideo.slides.reduce((sum, slide: any) => {
+          if (slide?.mediaType === 'video' && Number(slide?.videoDurationSec || 0) > 0) {
+            return sum + Number(slide.videoDurationSec);
+          }
+          return sum + fallbackSlideDuration;
+        }, 0)
+      : (ui.cuts.items?.length || 0) * fallbackSlideDuration;
     const effectiveSec = Math.max(cutsSec, ttsSec || scriptSec);
     return { scriptSec, ttsSec, cutsSec, effectiveSec };
-  }, [scriptMetrics.sec1x, ui.tts.measuredDuration, ui.cuts.items, ui.finalVideo.slideDuration]);
+  }, [scriptMetrics.sec1x, ui.tts.measuredDuration, ui.cuts.items, ui.finalVideo.slideDuration, ui.finalVideo.slides]);
   const longformGuide = useMemo(() => estimateLongformGuide(ui.script.output || ''), [ui.script.output]);
   const syncReport = useMemo(() => {
     const slides = ui.finalVideo.slides;
-    const slideDuration = Math.max(1, Number(ui.finalVideo.slideDuration || 3));
-    const slideDurationTotal = Math.max(0, slides.length * slideDuration);
+    const fallbackSlideDuration = Math.max(1, Number(ui.finalVideo.slideDuration || 3));
+    const slideDurationTotal = Math.max(0, slides.reduce((sum: number, slide: any) => {
+      if (slide?.mediaType === 'video' && Number(slide?.videoDurationSec || 0) > 0) {
+        return sum + Number(slide.videoDurationSec);
+      }
+      return sum + fallbackSlideDuration;
+    }, 0));
     const introDuration = ui.finalVideo.includeThumbnailIntro && ui.thumbnail.url
       ? Math.max(0.5, Number(ui.finalVideo.thumbnailIntroDuration || 1))
       : 0;
@@ -2319,9 +2404,13 @@ ${ui.selectedHookTitle}
     setUi(prev => ({ ...prev, cuts: { ...prev.cuts, splitting: true } }));
     await new Promise(resolve => setTimeout(resolve, 220));
     const isShorts = ui.script.type === 'shorts';
-    const items = splitScriptToCuts(ui.script.output, isShorts)
+    const baseItems = splitScriptToCuts(ui.script.output, isShorts)
       .map(v => v.trim())
       .filter(v => v.length > 1);
+
+    const items = !isShorts
+      ? rebalanceCutsToTarget(baseItems, Math.max(1, Math.round((Number(ui.tts.measuredDuration || 0) > 0 ? Number(ui.tts.measuredDuration || 0) : Number(scriptMetrics.sec1x || 0)) / 30)))
+      : baseItems;
 
     if (items.length === 0) {
       setUi(prev => ({ ...prev, cuts: { ...prev.cuts, splitting: false } }));
@@ -3402,6 +3491,7 @@ ${stylePrompt}
           cut: j.cut,
           imageUrl: j.imageUrl,
           videoUrl: mediaType === 'video' ? sortedVideoJobs.find((v: any) => v.cut === j.cut)?.videoUrl || '' : '',
+          videoDurationSec: mediaType === 'video' ? Number(sortedVideoJobs.find((v: any) => v.cut === j.cut)?.durationSec || 0) : 0,
           mediaType,
           motion: previousMotionByCut.get(j.cut) || pickSlideMotion(ui.cuts.items[j.cut - 1] || '', j.cut),
         };
@@ -3414,38 +3504,20 @@ ${stylePrompt}
 
     setUi(prev => ({ ...prev, finalVideo: { ...prev.finalVideo, generating: true } }));
 
-    if (ui.finalVideo.type === 'image_slide') {
-      setUi(prev => ({
-        ...prev,
-        finalVideo: {
-          ...prev.finalVideo,
-          generating: false,
-          slides: availableSlides,
-          activeSlide: 0,
-          url: '',
-          outputFormat: 'webm',
-        },
-      }));
-      const hookVideoCount = availableSlides.filter((s: any) => s.mediaType === 'video' && s.videoUrl).length;
-      alert(`이미지 슬라이드 구성이 완료되었습니다. (${availableSlides.length}컷, 영상 훅 ${hookVideoCount}컷 + 나머지 슬라이드)`);
-      return;
-    }
-
-    setTimeout(() => {
-      const firstImage = availableSlides[0]?.imageUrl || '';
-      setUi(prev => ({
-        ...prev,
-        finalVideo: {
-          ...prev.finalVideo,
-          generating: false,
-          url: firstImage,
-          slides: availableSlides,
-          activeSlide: 0,
-          outputFormat: 'mp4',
-        },
-      }));
-      alert('AI 비디오 생성은 목업 상태입니다. 현재는 이미지 슬라이드를 우선 사용하세요.');
-    }, 1200);
+    setUi(prev => ({
+      ...prev,
+      finalVideo: {
+        ...prev.finalVideo,
+        generating: false,
+        slides: availableSlides,
+        activeSlide: 0,
+        url: '',
+        outputFormat: 'webm',
+      },
+    }));
+    const hookVideoCount = availableSlides.filter((s: any) => s.mediaType === 'video' && s.videoUrl).length;
+    const modeLabel = ui.finalVideo.type === 'ai_video' ? 'AI 비디오 모드' : '이미지 슬라이드';
+    alert(`${modeLabel} 구성이 완료되었습니다. (${availableSlides.length}컷, 영상 훅 ${hookVideoCount}컷 + 나머지 슬라이드)`);
   };
 
   const handleExportSlideVideo = async () => {
@@ -3568,8 +3640,22 @@ ${stylePrompt}
         }
       }
 
-      const slideDuration = Math.max(1, ui.finalVideo.slideDuration);
-      const slideDurationTotal = slides.length * slideDuration;
+      const fallbackSlideDuration = Math.max(1, Number(ui.finalVideo.slideDuration || 3));
+      const slideDurations = slides.map((slide: any) => {
+        if (slide?.mediaType === 'video' && Number(slide?.videoDurationSec || 0) > 0) {
+          return Math.max(0.2, Number(slide.videoDurationSec));
+        }
+        return fallbackSlideDuration;
+      });
+      const slideStartTimes = slideDurations.reduce<number[]>((acc, duration, idx) => {
+        if (idx === 0) {
+          acc.push(0);
+          return acc;
+        }
+        acc.push(acc[idx - 1] + slideDurations[idx - 1]);
+        return acc;
+      }, []);
+      const slideDurationTotal = slideDurations.reduce((sum, v) => sum + v, 0);
       const baseVideoDuration = slideDurationTotal + introDuration;
 
       if (audioContext && destinationNode) {
@@ -3619,7 +3705,9 @@ ${stylePrompt}
         if (shouldMixSfx) {
           const triggerIndexes = ui.finalVideo.sfxEveryCut ? Array.from({ length: Math.max(0, slides.length - 1) }, (_, i) => i + 1) : [1];
           for (const idx of triggerIndexes) {
-            const when = ui.finalVideo.sfxEveryCut ? introDuration + idx * slideDuration : introDuration;
+            const when = ui.finalVideo.sfxEveryCut
+              ? introDuration + (slideStartTimes[idx] ?? introDuration)
+              : introDuration;
             if (when >= baseVideoDuration) continue;
 
             let selectedPath = ui.finalVideo.sfxTrack;
@@ -3782,8 +3870,18 @@ ${stylePrompt}
 
           const timelineElapsed = Math.max(0, elapsed - introDuration);
 
-          const slideIndex = Math.min(Math.floor(timelineElapsed / slideDuration), slides.length - 1);
-          const slideProgress = Math.min(1, Math.max(0, (timelineElapsed - slideIndex * slideDuration) / slideDuration));
+          let slideIndex = slides.length - 1;
+          for (let i = 0; i < slides.length; i += 1) {
+            const startSec = slideStartTimes[i] || 0;
+            const endSec = startSec + (slideDurations[i] || fallbackSlideDuration);
+            if (timelineElapsed < endSec || i === slides.length - 1) {
+              slideIndex = i;
+              break;
+            }
+          }
+          const startSec = slideStartTimes[slideIndex] || 0;
+          const currentDuration = Math.max(0.001, slideDurations[slideIndex] || fallbackSlideDuration);
+          const slideProgress = Math.min(1, Math.max(0, (timelineElapsed - startSec) / currentDuration));
           drawFrameForSlide(slideIndex, slideProgress);
 
           if (ui.finalVideo.templateTitleEnabled && ui.finalVideo.templateTitleText) {
@@ -5474,15 +5572,21 @@ ${JSON.stringify(cutPayload)}`,
                                 type="file"
                                 className="hidden"
                                 accept="video/*"
-                                onChange={(e) => {
+                                onChange={async (e) => {
                                   const file = e.target.files?.[0];
                                   if (!file) return;
                                   const url = URL.createObjectURL(file);
+                                  let durationSec = 0;
+                                  try {
+                                    durationSec = await probeVideoDuration(url);
+                                  } catch {
+                                    durationSec = 0;
+                                  }
                                   setUi(prev => ({
                                     ...prev,
                                     videoJobs: prev.videoJobs.some((j: any) => j.cut === cut.index)
-                                      ? prev.videoJobs.map((j: any) => j.cut === cut.index ? { ...j, videoUrl: url, status: '업로드됨', name: file.name } : j)
-                                      : [...prev.videoJobs, { cut: cut.index, videoUrl: url, status: '업로드됨', name: file.name }],
+                                      ? prev.videoJobs.map((j: any) => j.cut === cut.index ? { ...j, videoUrl: url, status: '업로드됨', name: file.name, durationSec } : j)
+                                      : [...prev.videoJobs, { cut: cut.index, videoUrl: url, status: '업로드됨', name: file.name, durationSec }],
                                   }));
                                 }}
                               />
