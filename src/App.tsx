@@ -1710,6 +1710,7 @@ export default function App() {
   const googleClientId = env.VITE_GOOGLE_CLIENT_ID || '';
   const googleRedirectUri = env.VITE_GOOGLE_REDIRECT_URI || `${window.location.origin}/oauth/google/callback`;
   const alimtalkWebhookUrl = String(env.VITE_ALIMTALK_WEBHOOK_URL || '').trim();
+  const appBuildId = String(env.VITE_APP_BUILD_ID || 'dev-local');
   const requireGoogleLogin = String(env.VITE_REQUIRE_GOOGLE_LOGIN || 'true').toLowerCase() !== 'false';
   const hasValidYouTubeAuth = Boolean(youtubeAuth?.accessToken && youtubeAuth.expiresAt > Date.now());
   const googleLoginReady = Boolean(googleClientId && googleRedirectUri);
@@ -5285,6 +5286,7 @@ ${JSON.stringify(cutPayload)}`,
           <div>
             <h1 className="text-4xl font-black tracking-tight text-white">AI Storyteller Lite</h1>
             <p className="text-slate-400 font-medium">유튜브 트렌드 분석 및 AI 콘텐츠 제작 솔루션</p>
+            <p className="text-[10px] text-slate-500 font-mono mt-1">Build: {appBuildId}</p>
           </div>
         </div>
         <div className="flex items-center gap-3">

@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/oauth/google/callback",
+      "destination": "/"
+    },
+    {
+      "source": "/oauth/google/callback/",
+      "destination": "/"
+    }
+  ]
+}
