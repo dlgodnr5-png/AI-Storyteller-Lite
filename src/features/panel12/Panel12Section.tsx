@@ -9,6 +9,7 @@ type Props = {
   handleGenerateFinalVideo: () => Promise<void> | void;
   handleExportSlideVideo: () => Promise<void>;
   handleDownloadSrt: () => void;
+  canDownload: boolean;
   handleConvertToMp4: () => Promise<void>;
   saveCurrentSubtitleTemplate: () => void;
   applySubtitleTemplate: (preset: any) => void;
@@ -53,6 +54,7 @@ export default function Panel12Section(props: Props) {
     handleGenerateFinalVideo,
     handleExportSlideVideo,
     handleDownloadSrt,
+    canDownload,
     handleConvertToMp4,
     saveCurrentSubtitleTemplate,
     applySubtitleTemplate,
@@ -950,6 +952,10 @@ export default function Panel12Section(props: Props) {
                         await handleExportSlideVideo();
                         return;
                       }
+                      if (!canDownload) {
+                        alert('승인된 사용자만 다운로드할 수 있습니다.');
+                        return;
+                      }
                       const a = document.createElement('a');
                       a.href = ui.finalVideo.url;
                       a.download = ui.finalVideo.outputFormat === 'mp4' ? 'final_slide_video.mp4' : 'final_slide_video.webm';
@@ -957,6 +963,10 @@ export default function Panel12Section(props: Props) {
                       return;
                     }
                     if (!ui.finalVideo.url) return alert('생성되거나 업로드된 영상이 없습니다.');
+                    if (!canDownload) {
+                      alert('승인된 사용자만 다운로드할 수 있습니다.');
+                      return;
+                    }
                     const a = document.createElement('a');
                     a.href = ui.finalVideo.url;
                     a.download = 'final_video.mp4';
@@ -982,7 +992,7 @@ export default function Panel12Section(props: Props) {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <button
                     onClick={handleDownloadSrt}
-                    disabled={ui.finalVideo.slides.length === 0}
+                    disabled={ui.finalVideo.slides.length === 0 || !canDownload}
                     className="w-full bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 font-black py-3 rounded-2xl transition-all text-xs disabled:opacity-40"
                   >
                     자막(SRT) 다운로드
@@ -1000,6 +1010,11 @@ export default function Panel12Section(props: Props) {
               {ui.finalVideo.ffmpegNote && (
                 <p className="text-[10px] text-indigo-200 bg-indigo-500/10 border border-indigo-400/20 rounded-lg px-3 py-2">
                   {ui.finalVideo.ffmpegNote}
+                </p>
+              )}
+              {!canDownload && (
+                <p className="text-[10px] text-rose-200 bg-rose-500/10 border border-rose-300/25 rounded-lg px-3 py-2">
+                  승인된 사용자만 영상/SRT 다운로드가 가능합니다. STEP 1에서 관리자 승인 요청을 보내세요.
                 </p>
               )}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[10px]">
