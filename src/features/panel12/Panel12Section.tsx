@@ -318,11 +318,12 @@ export default function Panel12Section(props: Props) {
                           >
                             {BUILTIN_SUBTITLE_TEMPLATES.map(template => {
                               const isActive = previewTemplate?.id === template.id;
+                              const isLocked = ui.finalVideo.subtitleTemplateLockedId === template.id;
                               return (
                                 <div
                                   key={template.id}
                                   onMouseEnter={() => setPreviewTemplateId(template.id)}
-                                  className={`h-full text-left border rounded-lg p-2 transition-all flex flex-col gap-2 ${isActive ? 'bg-slate-700 border-emerald-400/60' : 'bg-slate-800/80 border-white/10 hover:bg-slate-700'}`}
+                                  className={`h-full text-left border rounded-lg p-2 transition-all flex flex-col gap-2 ${isLocked ? 'bg-emerald-500/10 border-emerald-300' : isActive ? 'bg-slate-700 border-emerald-400/60' : 'bg-slate-800/80 border-white/10 hover:bg-slate-700'}`}
                                 >
                                   <button
                                     onClick={() => {
@@ -345,6 +346,9 @@ export default function Panel12Section(props: Props) {
                                       />
                                       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
                                       <p className="absolute left-2 bottom-2 text-[10px] font-black text-white">{template.sample}</p>
+                                      <div className={`absolute right-2 top-2 w-4 h-4 rounded-sm border-2 ${isLocked ? 'bg-emerald-400 border-emerald-200' : 'bg-black/40 border-white/40'}`}>
+                                        {isLocked && <span className="block w-full h-full text-[10px] leading-[12px] text-black font-black text-center">✓</span>}
+                                      </div>
                                     </div>
                                     <p className="text-[11px] font-black text-white flex items-center justify-between gap-2 mt-2">
                                       <span>{template.name}</span>
@@ -380,25 +384,9 @@ export default function Panel12Section(props: Props) {
                               >
                                 이 템플릿 적용
                               </button>
-                              <button
-                                onClick={() => {
-                                  const nextLock = !(ui.finalVideo.subtitleTemplateLockEnabled && ui.finalVideo.subtitleTemplateLockedId === previewTemplate.id);
-                                  setUi((prev: any) => ({
-                                    ...prev,
-                                    finalVideo: {
-                                      ...prev.finalVideo,
-                                      subtitleTemplateLockEnabled: nextLock,
-                                      subtitleTemplateLockedId: nextLock ? previewTemplate.id : '',
-                                    },
-                                  }));
-                                  if (nextLock) {
-                                    applyBuiltinSubtitleTemplate(previewTemplate.id);
-                                  }
-                                }}
-                                className={`w-full text-[10px] font-black py-2 rounded-lg border transition-all ${ui.finalVideo.subtitleTemplateLockEnabled && ui.finalVideo.subtitleTemplateLockedId === previewTemplate.id ? 'bg-amber-400 text-black border-amber-300' : 'bg-slate-800 text-slate-100 border-white/10 hover:bg-slate-700'}`}
-                              >
-                                {ui.finalVideo.subtitleTemplateLockEnabled && ui.finalVideo.subtitleTemplateLockedId === previewTemplate.id ? '템플릿 고정됨 (해제)' : '이 템플릿 고정'}
-                              </button>
+                              <p className="text-[10px] text-emerald-200/90 bg-emerald-500/10 border border-emerald-300/20 rounded-lg px-2 py-1.5">
+                                템플릿을 클릭하면 즉시 고정됩니다. 다른 템플릿을 클릭하면 새 템플릿으로 변경 고정됩니다.
+                              </p>
                             </div>
                           )}
                         </div>

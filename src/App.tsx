@@ -3832,11 +3832,6 @@ ${stylePrompt}
     const defaultTitleText = ui.selectedHookTitle ? normalizeHookTitleForOverlay(ui.selectedHookTitle) : '';
     const defaultHighlightWord = normalizeSubtitleText(defaultTitleText.split(/\r?\n/)[0] || '').split(/\s+/).find(Boolean) || '';
 
-    if (ui.finalVideo.subtitleTemplateLockEnabled && ui.finalVideo.subtitleTemplateLockedId && ui.finalVideo.subtitleTemplateLockedId !== templateId) {
-      alert('템플릿이 고정되어 있습니다. 고정 해제 후 다른 템플릿을 선택하세요.');
-      return;
-    }
-
     setUi(prev => ({
       ...prev,
       finalVideo: {
