@@ -1299,7 +1299,14 @@ export default function App() {
         publishedUrl: string;
         createdAt: string;
       }>,
-    }
+    },
+    autoFlow: {
+      enabled: true,
+      running: false,
+      step: '',
+      lastTitle: '',
+      error: '',
+    },
   });
 
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -1319,6 +1326,9 @@ export default function App() {
   const [previewingId, setPreviewingId] = useState<string | null>(null);
   const publishRetryTimersRef = useRef<Record<string, number[]>>({});
   const [youtubeAuth, setYoutubeAuth] = useState<YouTubeAuthSession | null>(null);
+  const latestUiRef = useRef<any>(ui);
+  const autoFlowLockRef = useRef(false);
+  const actionApiRef = useRef<any>({});
 
   const [results, setResults] = useState<any[]>([]);
   const [subtitleTemplates, setSubtitleTemplates] = useState<SavedSubtitleTemplate[]>([]);
@@ -1394,6 +1404,7 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    latestUiRef.current = ui;
     if (!initialUiRef.current) {
       initialUiRef.current = JSON.parse(JSON.stringify(ui));
     }
@@ -2241,6 +2252,120 @@ ${ui.selectedHookTitle}
     }
 
     setUi(prev => ({ ...prev, cuts: { ...prev.cuts, items, splitting: false } }));
+  };
+
+  const runAutoImageBatch = async () => {
+    if (autoImageBatchRunning) {
+      abortRef.current = true;
+      setAutoImageBatchRunning(false);
+      return { aborted: true, failCount: 0 };
+    }
+
+    abortRef.current = false;
+    setAutoImageBatchRunning(true);
+    let failCount = 0;
+    const prompts = [...(latestUiRef.current?.cuts?.prompts || [])];
+    for (const cut of prompts) {
+      if (abortRef.current) break;
+      try {
+        await generateImage(cut.index);
+      } catch {
+        failCount += 1;
+      }
+      await new Promise(r => setTimeout(r, 1200));
+    }
+    setAutoImageBatchRunning(false);
+    return { aborted: abortRef.current, failCount };
+  };
+
+  const runOneClickFromTitle = async (title: string) => {
+    if (!title?.trim()) return;
+    if (!keys.g1) {
+      alert('Gemini API 키를 먼저 설정하세요.');
+      return;
+    }
+    if (autoFlowLockRef.current || latestUiRef.current?.autoFlow?.running) {
+      alert('이미 원클릭 자동 제작이 진행 중입니다.');
+      return;
+    }
+    autoFlowLockRef.current = true;
+
+    setUi(prev => ({
+      ...prev,
+      selectedHookTitle: title,
+      autoFlow: {
+        ...prev.autoFlow,
+        running: true,
+        step: '대본 생성',
+        lastTitle: title,
+        error: '',
+      },
+    }));
+
+    try {
+      await new Promise(r => setTimeout(r, 0));
+      await actionApiRef.current.generateScript();
+      if (!latestUiRef.current?.script?.output?.trim()) throw new Error('대본 생성 실패');
+
+      setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '템플릿 제목 정리' } }));
+      await actionApiRef.current.rewriteTemplateTitleFromHook();
+
+      setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: 'TTS 생성' } }));
+      await actionApiRef.current.handleGenerateTTS();
+      if (!latestUiRef.current?.tts?.audioUrl) throw new Error('TTS 생성 실패');
+
+      setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '컷 분할' } }));
+      await actionApiRef.current.splitCuts();
+      if ((latestUiRef.current?.cuts?.items || []).length === 0) throw new Error('컷 분할 실패');
+
+      setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '프롬프트 생성' } }));
+      await actionApiRef.current.generateImagePrompts();
+      if ((latestUiRef.current?.cuts?.prompts || []).length === 0) throw new Error('프롬프트 생성 실패');
+
+      setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '이미지 자동 생성' } }));
+      const imageBatch = await runAutoImageBatch();
+      if (imageBatch.aborted) throw new Error('이미지 생성 중지됨');
+
+      setUi(prev => ({
+        ...prev,
+        autoFlow: { ...prev.autoFlow, step: '영상 구성' },
+        finalVideo: { ...prev.finalVideo, type: 'image_slide' },
+      }));
+      await new Promise(r => setTimeout(r, 0));
+      await actionApiRef.current.handleGenerateFinalVideo();
+      if ((latestUiRef.current?.finalVideo?.slides || []).length === 0) throw new Error('슬라이드 구성 실패');
+
+      setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '렌더링' } }));
+      await actionApiRef.current.handleExportSlideVideo();
+      if (!latestUiRef.current?.finalVideo?.url) throw new Error('영상 렌더링 실패');
+
+      setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '설명/태그 생성' } }));
+      await actionApiRef.current.generateDescription();
+
+      setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, running: false, step: '완료', error: '' } }));
+      alert('원클릭 자동 제작이 완료되었습니다. 14번 패널에서 예약/발행을 진행하세요.');
+    } catch (err: any) {
+      console.error(err);
+      setUi(prev => ({
+        ...prev,
+        autoFlow: {
+          ...prev.autoFlow,
+          running: false,
+          step: '오류',
+          error: err?.message || '원클릭 자동 제작 실패',
+        },
+      }));
+      alert(`원클릭 자동 제작 실패: ${err?.message || '알 수 없는 오류'}`);
+    } finally {
+      autoFlowLockRef.current = false;
+    }
+  };
+
+  const selectHookTitle = (title: string) => {
+    setUi(prev => ({ ...prev, selectedHookTitle: title }));
+    if (latestUiRef.current?.autoFlow?.enabled) {
+      void runOneClickFromTitle(title);
+    }
   };
 
   const handleDownloadThumbnail = () => {
@@ -3852,6 +3977,17 @@ ${JSON.stringify(cutPayload)}`,
     }
   };
 
+  actionApiRef.current = {
+    generateScript,
+    rewriteTemplateTitleFromHook,
+    handleGenerateTTS,
+    splitCuts,
+    generateImagePrompts,
+    handleGenerateFinalVideo,
+    handleExportSlideVideo,
+    generateDescription,
+  };
+
   return (
     <div className="max-w-[1600px] mx-auto px-6 py-10 space-y-8 relative z-10">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
@@ -4073,8 +4209,11 @@ ${JSON.stringify(cutPayload)}`,
                 {results.map((video) => (
                     <div 
                       key={video.id} 
-                      onClick={() => setUi(prev => ({ ...prev, selectedHookTitle: video.title }))}
-                      className={`group cursor-pointer bg-black/40 border rounded-2xl p-4 flex gap-4 transition-all ${ui.selectedHookTitle === video.title ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/5 hover:border-emerald-500/30'}`}
+                      onClick={() => {
+                        if (ui.autoFlow.running) return;
+                        selectHookTitle(video.title);
+                      }}
+                      className={`group cursor-pointer bg-black/40 border rounded-2xl p-4 flex gap-4 transition-all ${ui.selectedHookTitle === video.title ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/5 hover:border-emerald-500/30'} ${ui.autoFlow.running ? 'opacity-70' : ''}`}
                     >
                       <div className="w-32 aspect-video rounded-xl overflow-hidden flex-shrink-0 relative">
                         <img src={video.thumbnail} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" alt="" referrerPolicy="no-referrer" />
@@ -4120,6 +4259,21 @@ ${JSON.stringify(cutPayload)}`,
           <PanelHeader title="3. 바이럴 훅킹 제목 30선 & 전략 분석" id="p3" colorClass="text-orange-400" />
           {ui.panelsOpen.p3 && (
             <div className="space-y-8">
+              <div className="bg-black/30 border border-white/10 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-black text-cyan-300 uppercase tracking-widest">원클릭 자동 제작</p>
+                  <p className="text-[11px] text-slate-400 mt-1">제목 클릭 시 대본→TTS→컷→프롬프트→이미지→렌더를 자동 실행합니다.</p>
+                  {ui.autoFlow.step && <p className="text-[11px] text-emerald-300 font-bold mt-1">진행 단계: {ui.autoFlow.step}</p>}
+                  {ui.autoFlow.error && <p className="text-[11px] text-rose-300 font-bold mt-1">오류: {ui.autoFlow.error}</p>}
+                </div>
+                <button
+                  onClick={() => setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, enabled: !prev.autoFlow.enabled } }))}
+                  className={`px-4 py-2 rounded-xl text-xs font-black border transition-all ${ui.autoFlow.enabled ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-200 border-white/15'}`}
+                >
+                  {ui.autoFlow.enabled ? '원클릭 ON' : '원클릭 OFF'}
+                </button>
+              </div>
+
               <button 
                 onClick={generateHooks}
                 disabled={results.length === 0}
@@ -4133,8 +4287,11 @@ ${JSON.stringify(cutPayload)}`,
                   {ui.hookTitles.map((hook, idx) => (
                     <div 
                       key={idx} 
-                      onClick={() => setUi(prev => ({ ...prev, selectedHookTitle: hook.title }))}
-                      className={`cursor-pointer p-4 rounded-2xl group transition-all border ${ui.selectedHookTitle === hook.title ? 'bg-orange-500/20 border-orange-500' : 'bg-black/40 border-white/5 hover:border-orange-500/30'}`}
+                      onClick={() => {
+                        if (ui.autoFlow.running) return;
+                        selectHookTitle(hook.title);
+                      }}
+                      className={`cursor-pointer p-4 rounded-2xl group transition-all border ${ui.selectedHookTitle === hook.title ? 'bg-orange-500/20 border-orange-500' : 'bg-black/40 border-white/5 hover:border-orange-500/30'} ${ui.autoFlow.running ? 'opacity-70' : ''}`}
                     >
                       <div className="flex justify-between items-start mb-2">
                         <span className={`text-[10px] font-black px-2 py-1 rounded-md ${ui.selectedHookTitle === hook.title ? 'bg-orange-500 text-black' : 'text-orange-500 bg-orange-500/10'}`}>TITLE {idx + 1}</span>
@@ -4795,23 +4952,12 @@ ${JSON.stringify(cutPayload)}`,
 
                   <button 
                     onClick={async () => {
-                      if (autoImageBatchRunning) {
-                        abortRef.current = true;
-                        setAutoImageBatchRunning(false);
-                        return;
+                      const result = await runAutoImageBatch();
+                      if (result.aborted) {
+                        alert('이미지 생성이 중지되었습니다.');
+                      } else if (result.failCount > 0) {
+                        alert(`${result.failCount}개의 이미지 생성에 실패했습니다.`);
                       }
-                      abortRef.current = false;
-                      setAutoImageBatchRunning(true);
-                      let failCount = 0;
-                      for (const cut of ui.cuts.prompts) {
-                        if (abortRef.current) { alert('이미지 생성이 중지되었습니다.'); break; }
-                        try {
-                          await generateImage(cut.index);
-                        } catch { failCount++; }
-                        await new Promise(r => setTimeout(r, 2000));
-                      }
-                      setAutoImageBatchRunning(false);
-                      if (failCount > 0) alert(`${failCount}개의 이미지 생성에 실패했습니다.`);
                     }}
                     className={`text-white font-black px-4 py-6 rounded-xl transition-all text-xs vertical-text flex items-center justify-center ${autoImageBatchRunning ? 'running-gradient' : 'bg-indigo-600 hover:bg-indigo-700'}`}
                   >
