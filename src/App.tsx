@@ -595,6 +595,30 @@ const loadImageElement = (src: string) =>
     img.src = src;
   });
 
+const loadVideoElement = (src: string) =>
+  new Promise<HTMLVideoElement>((resolve, reject) => {
+    const video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    video.preload = 'auto';
+    video.muted = true;
+    video.playsInline = true;
+    const onLoaded = () => {
+      cleanup();
+      resolve(video);
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error(`영상 로드 실패: ${src}`));
+    };
+    const cleanup = () => {
+      video.removeEventListener('loadeddata', onLoaded);
+      video.removeEventListener('error', onError);
+    };
+    video.addEventListener('loadeddata', onLoaded);
+    video.addEventListener('error', onError);
+    video.src = src;
+  });
+
 const pickMediaRecorderMimeType = () => {
   const candidates = [
     'video/webm;codecs=vp9,opus',
@@ -1149,6 +1173,35 @@ const drawSlideToCanvas = (
   ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
 };
 
+const drawVideoFrameToCanvas = (
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  width: number,
+  height: number,
+) => {
+  if (!video.videoWidth || !video.videoHeight) return;
+
+  const mediaRatio = video.videoWidth / video.videoHeight;
+  const canvasRatio = width / height;
+  let sourceWidth = video.videoWidth;
+  let sourceHeight = video.videoHeight;
+  let sourceX = 0;
+  let sourceY = 0;
+
+  if (mediaRatio > canvasRatio) {
+    sourceWidth = video.videoHeight * canvasRatio;
+    sourceX = (video.videoWidth - sourceWidth) / 2;
+  } else if (mediaRatio < canvasRatio) {
+    sourceHeight = video.videoWidth / canvasRatio;
+    sourceY = (video.videoHeight - sourceHeight) / 2;
+  }
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height);
+};
+
 export default function App() {
   // --- State ---
   const [keys, setKeys] = useState({ yt1: '', yt2: '', g1: '' });
@@ -1224,7 +1277,7 @@ export default function App() {
       modifications: '',
       generating: false,
       url: '',
-      slides: [] as { cut: number; imageUrl: string; motion: SlideMotionType }[],
+      slides: [] as Array<{ cut: number; imageUrl: string; motion: SlideMotionType; mediaType?: 'image' | 'video'; videoUrl?: string }>,
       activeSlide: 0,
       slideDuration: 3,
       resolution: 'hd' as RenderResolution,
@@ -1271,6 +1324,8 @@ export default function App() {
       sfxMode: 'single' as 'single' | 'auto',
       bgmDuckingEnabled: true,
       bgmDuckingDb: 10,
+      useHybridHookVideos: true,
+      hookVideoCount: 7,
     },
     publishing: {
       selectedPlatform: 'youtube' as PublishPlatform,
@@ -3330,14 +3385,27 @@ ${stylePrompt}
 
   const handleGenerateFinalVideo = async () => {
     const previousMotionByCut = new Map(ui.finalVideo.slides.map(s => [s.cut, s.motion] as const));
+    const sortedVideoJobs = ui.videoJobs
+      .filter((j: any) => j.videoUrl)
+      .sort((a: any, b: any) => a.cut - b.cut);
+    const hookVideoCuts = new Set(
+      ui.finalVideo.useHybridHookVideos
+        ? sortedVideoJobs.slice(0, Math.max(0, Number(ui.finalVideo.hookVideoCount || 7))).map((j: any) => j.cut)
+        : [],
+    );
     const availableSlides = ui.imageJobs
       .filter(j => j.imageUrl)
       .sort((a, b) => a.cut - b.cut)
-      .map(j => ({
-        cut: j.cut,
-        imageUrl: j.imageUrl,
-        motion: previousMotionByCut.get(j.cut) || pickSlideMotion(ui.cuts.items[j.cut - 1] || '', j.cut),
-      }));
+      .map(j => {
+        const mediaType: 'image' | 'video' = hookVideoCuts.has(j.cut) ? 'video' : 'image';
+        return {
+          cut: j.cut,
+          imageUrl: j.imageUrl,
+          videoUrl: mediaType === 'video' ? sortedVideoJobs.find((v: any) => v.cut === j.cut)?.videoUrl || '' : '',
+          mediaType,
+          motion: previousMotionByCut.get(j.cut) || pickSlideMotion(ui.cuts.items[j.cut - 1] || '', j.cut),
+        };
+      });
 
     if (availableSlides.length === 0) {
       alert('생성된 이미지가 없습니다. 11번 패널에서 이미지를 먼저 준비하세요.');
@@ -3358,7 +3426,8 @@ ${stylePrompt}
           outputFormat: 'webm',
         },
       }));
-      alert(`이미지 슬라이드 구성이 완료되었습니다. (${availableSlides.length}컷, 6가지 모션 자동 배정)`);
+      const hookVideoCount = availableSlides.filter((s: any) => s.mediaType === 'video' && s.videoUrl).length;
+      alert(`이미지 슬라이드 구성이 완료되었습니다. (${availableSlides.length}컷, 영상 훅 ${hookVideoCount}컷 + 나머지 슬라이드)`);
       return;
     }
 
@@ -3406,6 +3475,7 @@ ${stylePrompt}
     setUi(prev => ({ ...prev, finalVideo: { ...prev.finalVideo, generating: true } }));
 
     let audioContext: AudioContext | null = null;
+    const loadedSlideVideos: HTMLVideoElement[] = [];
     try {
       const ratio = ui.cuts.ratio || '9:16';
       const { width, height } = getRenderDimensions(ratio, ui.finalVideo.resolution);
@@ -3417,7 +3487,38 @@ ${stylePrompt}
         throw new Error('캔버스 컨텍스트를 생성할 수 없습니다.');
       }
 
-      const images = await Promise.all(slides.map(slide => loadImageElement(slide.imageUrl)));
+      const images = await Promise.all(
+        slides.map(async slide => {
+          if (!slide.imageUrl) return null;
+          try {
+            return await loadImageElement(slide.imageUrl);
+          } catch (err) {
+            console.warn('슬라이드 이미지 로드 실패, 영상 프레임으로 대체 시도:', err);
+            return null;
+          }
+        }),
+      );
+      const videoSlideEntries = await Promise.all(
+        slides.map(async slide => {
+          if (slide.mediaType !== 'video' || !slide.videoUrl) return null;
+          try {
+            const video = await loadVideoElement(slide.videoUrl);
+            video.muted = true;
+            video.loop = true;
+            loadedSlideVideos.push(video);
+            return [slide.cut, video] as const;
+          } catch (err) {
+            console.warn(`CUT ${slide.cut} 영상 로드 실패, 이미지로 대체합니다.`, err);
+            return null;
+          }
+        }),
+      );
+      const videoByCut = new Map<number, HTMLVideoElement>(
+        videoSlideEntries.filter((entry): entry is readonly [number, HTMLVideoElement] => Boolean(entry)),
+      );
+      if (images.every(item => !item) && videoByCut.size === 0) {
+        throw new Error('렌더링 가능한 이미지/영상이 없습니다. 11번 패널에서 컷 자산을 확인해 주세요.');
+      }
       const introEnabled = ui.finalVideo.includeThumbnailIntro && Boolean(ui.thumbnail.url);
       const introImage = introEnabled ? await loadImageElement(ui.thumbnail.url) : null;
       const introDuration = introEnabled ? Math.max(0.5, Number(ui.finalVideo.thumbnailIntroDuration || 1)) : 0;
@@ -3564,10 +3665,58 @@ ${stylePrompt}
             Math.max(12, ui.finalVideo.subtitleMaxChars),
           )
         : [];
+      let activeVideoCut = -1;
+      const pauseVideo = (cut: number) => {
+        if (cut < 0) return;
+        const video = videoByCut.get(cut);
+        if (!video) return;
+        video.pause();
+        try {
+          video.currentTime = 0;
+        } catch {
+          // ignore seek reset failures
+        }
+      };
+
+      const drawFrameForSlide = (slideIndex: number, slideProgress: number) => {
+        const slide = slides[slideIndex];
+        const image = images[slideIndex];
+        const video = slide?.mediaType === 'video' ? videoByCut.get(slide.cut) : undefined;
+
+        if (video) {
+          if (activeVideoCut !== slide.cut) {
+            pauseVideo(activeVideoCut);
+            activeVideoCut = slide.cut;
+            try {
+              video.currentTime = 0;
+            } catch {
+              // ignore seek reset failures
+            }
+            void video.play().catch(() => undefined);
+          }
+          if (video.readyState >= 2) {
+            drawVideoFrameToCanvas(ctx, video, width, height);
+            return;
+          }
+        } else if (activeVideoCut !== -1) {
+          pauseVideo(activeVideoCut);
+          activeVideoCut = -1;
+        }
+
+        if (image) {
+          drawSlideToCanvas(ctx, image, slide.motion, slideProgress, width, height);
+          return;
+        }
+
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+      };
+
       if (introImage) {
         drawSlideToCanvas(ctx, introImage, 'zoom_in', 0, width, height);
       } else {
-        drawSlideToCanvas(ctx, images[0], slides[0].motion, 0, width, height);
+        drawFrameForSlide(0, 0);
       }
 
       const chunks: Blob[] = [];
@@ -3620,9 +3769,7 @@ ${stylePrompt}
           }
           const elapsed = (performance.now() - start) / 1000;
           if (elapsed >= totalDuration) {
-            const lastSlide = slides[slides.length - 1];
-            const lastImage = images[images.length - 1];
-            drawSlideToCanvas(ctx, lastImage, lastSlide.motion, 1, width, height);
+            drawFrameForSlide(slides.length - 1, 1);
             resolve();
             return;
           }
@@ -3637,7 +3784,7 @@ ${stylePrompt}
 
           const slideIndex = Math.min(Math.floor(timelineElapsed / slideDuration), slides.length - 1);
           const slideProgress = Math.min(1, Math.max(0, (timelineElapsed - slideIndex * slideDuration) / slideDuration));
-          drawSlideToCanvas(ctx, images[slideIndex], slides[slideIndex].motion, slideProgress, width, height);
+          drawFrameForSlide(slideIndex, slideProgress);
 
           if (ui.finalVideo.templateTitleEnabled && ui.finalVideo.templateTitleText) {
             drawTemplateTitleOverlay(
@@ -3697,6 +3844,7 @@ ${stylePrompt}
         render();
       });
 
+      pauseVideo(activeVideoCut);
       recorder.stop();
       if (taskAbortRef.current.finalRender) {
         setUi(prev => ({ ...prev, finalVideo: { ...prev.finalVideo, generating: false } }));
@@ -3721,6 +3869,9 @@ ${stylePrompt}
       setUi(prev => ({ ...prev, finalVideo: { ...prev.finalVideo, generating: false } }));
       alert(`슬라이드 영상 렌더링 실패: ${err?.message || '알 수 없는 오류'}`);
     } finally {
+      loadedSlideVideos.forEach(video => {
+        video.pause();
+      });
       if (audioContext) {
         await audioContext.close().catch(() => undefined);
       }
@@ -5217,6 +5368,7 @@ ${JSON.stringify(cutPayload)}`,
             <div className="space-y-6">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <p className="text-xs text-slate-400 max-w-md">컷을 클릭하면 대기열에 추가되며 순차적으로 이미지가 자동 생성됩니다. (안정성을 위해 컷당 20~25초 간격)</p>
+                <p className="text-[11px] text-violet-200/90 bg-violet-500/10 border border-violet-300/20 rounded-xl px-3 py-2">혼합 렌더 권장: 11번에서 초반 훅 컷 영상 업로드 → 12번에서 슬라이드 구성 → 렌더링</p>
                 
                 <div className="flex items-center gap-3">
                   <select 
@@ -5261,6 +5413,7 @@ ${JSON.stringify(cutPayload)}`,
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {ui.cuts.prompts.map((cut, idx) => {
                     const job = ui.imageJobs.find(j => j.cut === cut.index);
+                    const videoJob = ui.videoJobs.find((j: any) => j.cut === cut.index);
                     return (
                       <div key={idx} className="bg-black/40 border border-white/5 rounded-3xl overflow-hidden group relative">
                         <div className="aspect-video bg-white/5 relative">
@@ -5278,6 +5431,9 @@ ${JSON.stringify(cutPayload)}`,
                             </div>
                           )}
                           <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-md px-2 py-1 rounded-lg text-[10px] font-black text-cyan-400">CUT {cut.index}</div>
+                          {videoJob?.videoUrl && (
+                            <div className="absolute top-3 right-3 bg-violet-500/75 backdrop-blur-md px-2 py-1 rounded-lg text-[10px] font-black text-white">영상 훅</div>
+                          )}
                           
                           {/* Action Buttons Overlay */}
                           <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
@@ -5312,6 +5468,39 @@ ${JSON.stringify(cutPayload)}`,
                                 }}
                               />
                             </label>
+                            <label className="p-2 bg-violet-500 text-white rounded-lg hover:bg-violet-400 transition-all cursor-pointer" title="영상 업로드">
+                              <Video className="w-4 h-4" />
+                              <input
+                                type="file"
+                                className="hidden"
+                                accept="video/*"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  const url = URL.createObjectURL(file);
+                                  setUi(prev => ({
+                                    ...prev,
+                                    videoJobs: prev.videoJobs.some((j: any) => j.cut === cut.index)
+                                      ? prev.videoJobs.map((j: any) => j.cut === cut.index ? { ...j, videoUrl: url, status: '업로드됨', name: file.name } : j)
+                                      : [...prev.videoJobs, { cut: cut.index, videoUrl: url, status: '업로드됨', name: file.name }],
+                                  }));
+                                }}
+                              />
+                            </label>
+                            {videoJob?.videoUrl && (
+                              <button
+                                onClick={() => {
+                                  setUi(prev => ({
+                                    ...prev,
+                                    videoJobs: prev.videoJobs.filter((j: any) => j.cut !== cut.index),
+                                  }));
+                                }}
+                                className="p-2 bg-violet-950 text-violet-200 rounded-lg hover:bg-violet-900 transition-all"
+                                title="영상 제거"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                             {job?.imageUrl && (
                               <>
                                 <button 
@@ -5345,6 +5534,7 @@ ${JSON.stringify(cutPayload)}`,
                         <div className="p-4 space-y-2">
                           <p className="text-[10px] text-slate-300 line-clamp-2 leading-relaxed font-medium">"{ui.cuts.items[cut.index - 1]}"</p>
                           <p className="text-[9px] text-slate-600 italic line-clamp-1">Prompt: {cut.prompt}</p>
+                          <p className="text-[9px] text-slate-400">이미지: {job?.status || '미생성'} · 영상: {videoJob?.status || '없음'}</p>
                         </div>
                       </div>
                     );

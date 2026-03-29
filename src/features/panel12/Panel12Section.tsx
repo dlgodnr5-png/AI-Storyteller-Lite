@@ -82,13 +82,143 @@ export default function Panel12Section(props: Props) {
   } = props;
 
   const [previewTemplateId, setPreviewTemplateId] = React.useState<string>(BUILTIN_SUBTITLE_TEMPLATES[0]?.id || '');
+  const [templateTitleManualEdited, setTemplateTitleManualEdited] = React.useState(false);
+  const previewAudioRef = React.useRef<HTMLAudioElement | null>(null);
+  const [previewAudioPath, setPreviewAudioPath] = React.useState('');
+  const [previewAudioType, setPreviewAudioType] = React.useState<'' | 'bgm' | 'sfx'>('');
   const previewTemplate = BUILTIN_SUBTITLE_TEMPLATES.find(t => t.id === previewTemplateId) || BUILTIN_SUBTITLE_TEMPLATES[0];
+  const maxHookVideoCount = Math.max(1, ui.cuts.items?.length || 1);
+
+  const stopPreviewAudio = React.useCallback(() => {
+    if (!previewAudioRef.current) return;
+    previewAudioRef.current.pause();
+    previewAudioRef.current.currentTime = 0;
+    previewAudioRef.current = null;
+    setPreviewAudioPath('');
+    setPreviewAudioType('');
+  }, []);
+
+  const playPreviewAudio = React.useCallback((path: string, type: 'bgm' | 'sfx') => {
+    if (!path) return;
+    if (previewAudioPath === path) {
+      stopPreviewAudio();
+      return;
+    }
+
+    stopPreviewAudio();
+    const audio = new Audio(encodeURI(path));
+    audio.loop = type === 'bgm';
+    const volumePercent = type === 'bgm' ? Number(ui.finalVideo.bgmVolume || 0) : Number(ui.finalVideo.sfxVolume || 0);
+    audio.volume = Math.min(1, Math.max(0, volumePercent / 100));
+    audio.onended = () => {
+      if (type === 'sfx') {
+        setPreviewAudioPath('');
+        setPreviewAudioType('');
+        previewAudioRef.current = null;
+      }
+    };
+    previewAudioRef.current = audio;
+    setPreviewAudioPath(path);
+    setPreviewAudioType(type);
+    void audio.play().catch(() => {
+      stopPreviewAudio();
+      alert('오디오 미리듣기를 시작할 수 없습니다. 브라우저 권한/자동재생 설정을 확인해 주세요.');
+    });
+  }, [previewAudioPath, stopPreviewAudio, ui.finalVideo.bgmVolume, ui.finalVideo.sfxVolume]);
+
+  React.useEffect(() => {
+    return () => stopPreviewAudio();
+  }, [stopPreviewAudio]);
+
+  React.useEffect(() => {
+    if (!previewAudioRef.current) return;
+    const volumePercent = previewAudioType === 'bgm' ? Number(ui.finalVideo.bgmVolume || 0) : Number(ui.finalVideo.sfxVolume || 0);
+    previewAudioRef.current.volume = Math.min(1, Math.max(0, volumePercent / 100));
+  }, [previewAudioType, ui.finalVideo.bgmVolume, ui.finalVideo.sfxVolume]);
+
+  const applyTemplateAndAutoTitle = (template: any) => {
+    applyBuiltinSubtitleTemplate(template.id);
+    setTemplateTitleManualEdited(false);
+    if (ui.selectedHookTitle) {
+      rewriteTemplateTitleFromHook();
+      return;
+    }
+    const fallbackTitle = (template.sample || template.name || '').trim();
+    if (fallbackTitle) {
+      setUi((prev: any) => ({
+        ...prev,
+        finalVideo: {
+          ...prev.finalVideo,
+          templateTitleText: fallbackTitle,
+        },
+      }));
+    }
+  };
 
   return (
     <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl">
-      <PanelHeader title="12. 최종 영상생성" id="p12" colorClass="text-emerald-400" />
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <h3 className="text-xl font-black text-emerald-400">12. 최종 영상생성</h3>
+          <p className="text-[11px] text-emerald-100/95 bg-emerald-500/15 border border-emerald-300/25 rounded-lg px-3 py-1.5 truncate">
+            최적 순서: 이미지 준비 → 훅 영상 업로드 → 훅 컷 수 지정 → 슬라이드 구성 → 렌더링/MP4
+          </p>
+        </div>
+        <button
+          onClick={() => setUi((prev: any) => ({ ...prev, panelsOpen: { ...prev.panelsOpen, p12: !prev.panelsOpen.p12 } }))}
+          className="text-xs font-bold bg-white/10 px-3 py-1 rounded-lg hover:bg-white/20 transition-all"
+        >
+          {ui.panelsOpen.p12 ? '숨기기' : '보이기'}
+        </button>
+      </div>
       {ui.panelsOpen.p12 && (
         <div className="space-y-8">
+          <div className="rounded-2xl border border-emerald-300/45 bg-emerald-500/20 px-4 py-3">
+            <p className="text-[11px] font-black text-white uppercase tracking-widest">최적 제작 순서 가이드 (고정)</p>
+            <p className="text-[12px] text-white mt-1 font-semibold">1) 컷 이미지 준비 → 2) 초반 훅 컷 영상 업로드 → 3) 영상 훅 컷 수 지정 → 4) 슬라이드 구성 → 5) 렌더링/MP4 변환</p>
+            <p className="text-[10px] text-emerald-50 mt-1">권장: 쇼츠는 훅 5~7컷, 컷당 2~4초, TTS 완료 후 렌더링</p>
+          </div>
+          <div className="rounded-2xl border border-amber-300/40 bg-amber-500/10 px-4 py-3 space-y-3">
+            <p className="text-[11px] font-black text-amber-100 uppercase tracking-widest">오디오 빠른 미리듣기 (항상 표시)</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-amber-100 uppercase tracking-widest">배경음악</label>
+                <select
+                  value={ui.finalVideo.bgmTrack}
+                  onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, bgmTrack: e.target.value, bgmTrackUserSelected: true } }))}
+                  className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
+                >
+                  {BGM_LIBRARY.map(track => (
+                    <option key={track.path} value={track.path}>{track.label}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => playPreviewAudio(ui.finalVideo.bgmTrack, 'bgm')}
+                  className={`w-full rounded-lg border px-3 py-2 text-[11px] font-black transition-all flex items-center justify-center gap-1 ${previewAudioType === 'bgm' && previewAudioPath === ui.finalVideo.bgmTrack ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/10 text-white border-white/30 hover:bg-white/20'}`}
+                >
+                  <Play className="w-3 h-3" /> {previewAudioType === 'bgm' && previewAudioPath === ui.finalVideo.bgmTrack ? '배경음악 미리듣기 중지' : '배경음악 미리듣기'}
+                </button>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-amber-100 uppercase tracking-widest">효과음</label>
+                <select
+                  value={ui.finalVideo.sfxTrack}
+                  onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxTrack: e.target.value } }))}
+                  className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
+                >
+                  {SFX_LIBRARY.map(track => (
+                    <option key={track.path} value={track.path}>{track.label}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => playPreviewAudio(ui.finalVideo.sfxTrack, 'sfx')}
+                  className={`w-full rounded-lg border px-3 py-2 text-[11px] font-black transition-all flex items-center justify-center gap-1 ${previewAudioType === 'sfx' && previewAudioPath === ui.finalVideo.sfxTrack ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/10 text-white border-white/30 hover:bg-white/20'}`}
+                >
+                  <Play className="w-3 h-3" /> {previewAudioType === 'sfx' && previewAudioPath === ui.finalVideo.sfxTrack ? '효과음 미리듣기 중지' : '효과음 미리듣기'}
+                </button>
+              </div>
+            </div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="space-y-6">
               <div className="space-y-2">
@@ -121,6 +251,33 @@ export default function Panel12Section(props: Props) {
 
               {ui.finalVideo.type === 'image_slide' && (
                 <div className="space-y-3 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl p-4">
+                  <div className="flex items-center justify-between gap-3 pt-1">
+                    <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">영상 훅 혼합 사용</label>
+                    <button
+                      onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, useHybridHookVideos: !prev.finalVideo.useHybridHookVideos } }))}
+                      className={`px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.useHybridHookVideos ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
+                    >
+                      {ui.finalVideo.useHybridHookVideos ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                  {ui.finalVideo.useHybridHookVideos && (
+                    <>
+                      <div className="flex items-center justify-between gap-4">
+                        <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">영상 생성 컷 수</label>
+                        <span className="text-xs text-emerald-200 font-bold">{Math.max(0, Number(ui.finalVideo.hookVideoCount || 0))}컷</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max={String(maxHookVideoCount)}
+                        step="1"
+                        value={Math.max(0, Math.min(maxHookVideoCount, Number(ui.finalVideo.hookVideoCount || 0)))}
+                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, hookVideoCount: Number(e.target.value) } }))}
+                        className="w-full accent-emerald-300"
+                      />
+                      <p className="text-[10px] text-emerald-100/90">앞에서부터 지정한 컷 수만큼 업로드된 영상을 우선 배치하고, 나머지는 이미지 슬라이드로 렌더링합니다.</p>
+                    </>
+                  )}
                   <div className="flex items-center justify-between gap-4">
                     <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">컷당 재생 시간</label>
                     <span className="text-xs text-emerald-200 font-bold">{ui.finalVideo.slideDuration}초</span>
@@ -193,6 +350,12 @@ export default function Panel12Section(props: Props) {
                           <option key={track.path} value={track.path}>{track.label}</option>
                         ))}
                       </select>
+                      <button
+                        onClick={() => playPreviewAudio(ui.finalVideo.bgmTrack, 'bgm')}
+                        className={`w-full rounded-lg border px-3 py-2 text-[10px] font-black transition-all flex items-center justify-center gap-1 ${previewAudioType === 'bgm' && previewAudioPath === ui.finalVideo.bgmTrack ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/5 text-slate-200 border-white/15 hover:bg-white/10'}`}
+                      >
+                        <Play className="w-3 h-3" /> {previewAudioType === 'bgm' && previewAudioPath === ui.finalVideo.bgmTrack ? '배경음악 미리듣기 중지' : '배경음악 미리듣기'}
+                      </button>
                       <div className="flex items-center justify-between gap-3">
                         <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">BGM 볼륨</label>
                         <span className="text-[10px] text-emerald-100 font-bold">{ui.finalVideo.bgmVolume}%</span>
@@ -259,19 +422,24 @@ export default function Panel12Section(props: Props) {
                           수동 고정
                         </button>
                       </div>
-                      {ui.finalVideo.sfxMode === 'single' ? (
-                        <select
-                          value={ui.finalVideo.sfxTrack}
-                          onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxTrack: e.target.value } }))}
-                          className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
-                        >
-                          {SFX_LIBRARY.map(track => (
-                            <option key={track.path} value={track.path}>{track.label}</option>
-                          ))}
-                        </select>
-                      ) : (
+                      <select
+                        value={ui.finalVideo.sfxTrack}
+                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxTrack: e.target.value } }))}
+                        className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
+                      >
+                        {SFX_LIBRARY.map(track => (
+                          <option key={track.path} value={track.path}>{track.label}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => playPreviewAudio(ui.finalVideo.sfxTrack, 'sfx')}
+                        className={`w-full rounded-lg border px-3 py-2 text-[10px] font-black transition-all flex items-center justify-center gap-1 ${previewAudioType === 'sfx' && previewAudioPath === ui.finalVideo.sfxTrack ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/5 text-slate-200 border-white/15 hover:bg-white/10'}`}
+                      >
+                        <Play className="w-3 h-3" /> {previewAudioType === 'sfx' && previewAudioPath === ui.finalVideo.sfxTrack ? '효과음 미리듣기 중지' : '효과음 미리듣기'}
+                      </button>
+                      {ui.finalVideo.sfxMode === 'auto' && (
                         <p className="text-[10px] text-emerald-100/90 bg-emerald-500/10 border border-emerald-300/20 rounded-lg px-3 py-2">
-                          대본 키워드(긴장/유머/사건/총격/전화/강조)를 분석해 컷 전환 효과음을 자동 추천합니다.
+                          자동 추천 모드에서는 컷별 키워드 분석으로 효과음을 선택합니다. 위 드롭다운은 미리듣기/기본 대체용으로 사용됩니다.
                         </p>
                       )}
                       <div className="flex items-center justify-between gap-3">
@@ -328,10 +496,7 @@ export default function Panel12Section(props: Props) {
                                   <button
                                     onClick={() => {
                                       setPreviewTemplateId(template.id);
-                                      applyBuiltinSubtitleTemplate(template.id);
-                                      if (!ui.finalVideo.templateTitleText && ui.selectedHookTitle) {
-                                        rewriteTemplateTitleFromHook();
-                                      }
+                                      applyTemplateAndAutoTitle(template);
                                     }}
                                     className="w-full text-left flex-1"
                                   >
@@ -379,7 +544,7 @@ export default function Panel12Section(props: Props) {
                               <p className="text-[11px] font-black text-white">{previewTemplate.name}</p>
                               <p className="text-[10px] text-slate-300">{previewTemplate.sample}</p>
                               <button
-                                onClick={() => applyBuiltinSubtitleTemplate(previewTemplate.id)}
+                                onClick={() => applyTemplateAndAutoTitle(previewTemplate)}
                                 className="w-full bg-emerald-500 hover:bg-emerald-400 text-black text-[10px] font-black py-2 rounded-lg"
                               >
                                 이 템플릿 적용
@@ -416,11 +581,19 @@ export default function Panel12Section(props: Props) {
                             <>
                               <input
                                 value={ui.finalVideo.templateTitleText}
-                                onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleText: e.target.value } }))}
+                                onChange={(e) => {
+                                  setTemplateTitleManualEdited(true);
+                                  setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleText: e.target.value } }));
+                                }}
                                 placeholder="템플릿 스타일로 넣을 제목"
                                 className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
                                 maxLength={90}
                               />
+                              {templateTitleManualEdited && (
+                                <p className="text-[10px] text-amber-200/95 bg-amber-500/10 border border-amber-300/25 rounded-md px-2 py-1">
+                                  수동 수정됨: 자동 제목 덮어쓰기는 템플릿을 다시 클릭할 때만 실행됩니다.
+                                </p>
+                              )}
                               <button
                                 onClick={rewriteTemplateTitleFromHook}
                                 disabled={ui.finalVideo.templateTitleGenerating || !ui.selectedHookTitle}
