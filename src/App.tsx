@@ -1075,6 +1075,7 @@ const drawSubtitleOverlay = (
     preset: SubtitlePreset;
     progress?: number;
     entryAnimation?: SubtitleEntryAnimation;
+    subtitleScale?: number;
   },
 ) => {
   const rendered = lines.filter(Boolean).slice(0, 2);
@@ -1092,7 +1093,8 @@ const drawSubtitleOverlay = (
     ctx.fillText(line, width / 2, y);
   };
 
-  const fontSize = Math.round(Math.min(width, height) * preset.fontScale);
+  const subtitleScale = Math.max(0.7, Math.min(2.2, Number(options?.subtitleScale || 1)));
+  const fontSize = Math.round(Math.min(width, height) * preset.fontScale * subtitleScale);
   const lineHeight = Math.round(fontSize * 1.34);
   const blockHeight = lineHeight * rendered.length + 28;
   const defaultGrid = position === 'middle' ? 5 : 9;
@@ -1575,6 +1577,7 @@ export default function App() {
       resolution: 'hd' as RenderResolution,
       subtitleEnabled: true,
       subtitleMaxChars: 24,
+      subtitleScale: 1,
       subtitlePosition: 'bottom' as SubtitlePosition,
       subtitleGridPosition: 9,
       subtitlePreset: 'shorts' as SubtitlePreset,
@@ -5506,6 +5509,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
                   preset: ui.finalVideo.subtitlePreset,
                   progress: segmentProgress,
                   entryAnimation: ui.finalVideo.subtitleEntryAnimation,
+                  subtitleScale: ui.finalVideo.subtitleScale,
                 },
               );
             }

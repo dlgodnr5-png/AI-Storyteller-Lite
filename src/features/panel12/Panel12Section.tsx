@@ -2,6 +2,17 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Video, Image as ImageIcon, Download, Loader2, Trash2, Play } from 'lucide-react';
 
+const TITLE_FONT_OPTIONS = [
+  '아네모네',
+  'Pretendard',
+  'Noto Sans KR',
+  'Nanum Gothic',
+  'Gowun Dodum',
+  'Nanum Myeongjo',
+  'Nanum Pen Script',
+  'Nanum Brush Script',
+];
+
 type Props = {
   ui: any;
   setUi: React.Dispatch<React.SetStateAction<any>>;
@@ -152,11 +163,35 @@ export default function Panel12Section(props: Props) {
   const [previewTemplateId, setPreviewTemplateId] = React.useState<string>(BUILTIN_SUBTITLE_TEMPLATES[0]?.id || '');
   const [templateTitleManualEdited, setTemplateTitleManualEdited] = React.useState(false);
   const previewAudioRef = React.useRef<HTMLAudioElement | null>(null);
+  const previewFrameRef = React.useRef<HTMLDivElement | null>(null);
   const [previewAudioPath, setPreviewAudioPath] = React.useState('');
   const [previewAudioType, setPreviewAudioType] = React.useState<'' | 'bgm' | 'sfx'>('');
   const [previewGuideMode, setPreviewGuideMode] = React.useState<'shorts' | 'reels' | 'tiktok'>('shorts');
+  const [previewFrameWidth, setPreviewFrameWidth] = React.useState(360);
   const previewTemplate = BUILTIN_SUBTITLE_TEMPLATES.find(t => t.id === previewTemplateId) || BUILTIN_SUBTITLE_TEMPLATES[0];
   const maxHookVideoCount = Math.max(1, ui.cuts.items?.length || 1);
+
+  React.useEffect(() => {
+    if (!previewFrameRef.current) return;
+    const target = previewFrameRef.current;
+    const update = () => setPreviewFrameWidth(Math.max(180, target.clientWidth || 360));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, []);
+
+  const previewTitleFontPx = React.useMemo(() => {
+    const renderFontAt1080 = Math.max(16, 18 * Math.max(0.75, Math.min(1.8, Number(ui.finalVideo.templateTitleScale || 1))));
+    return Math.max(8, renderFontAt1080 * (previewFrameWidth / 1080));
+  }, [previewFrameWidth, ui.finalVideo.templateTitleScale]);
+
+  const previewSubtitleFontPx = React.useMemo(() => {
+    const preset = SUBTITLE_PRESETS[ui.finalVideo.subtitlePreset] as any;
+    const baseScale = Number(preset?.fontScale || 0.045);
+    const subtitleScale = Math.max(0.7, Math.min(2.2, Number(ui.finalVideo.subtitleScale || 1)));
+    return Math.max(10, Math.round(previewFrameWidth * baseScale * subtitleScale));
+  }, [previewFrameWidth, ui.finalVideo.subtitlePreset, ui.finalVideo.subtitleScale, SUBTITLE_PRESETS]);
 
   const stopPreviewAudio = React.useCallback(() => {
     if (!previewAudioRef.current) return;
@@ -654,11 +689,15 @@ export default function Panel12Section(props: Props) {
                               <div className="grid grid-cols-2 gap-2">
                                 <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
                                   폰트
-                                  <input
+                                  <select
                                     value={ui.finalVideo.templateTitleFontFamily}
                                     onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleFontFamily: e.target.value } }))}
-                                    className="w-24 bg-transparent text-right outline-none"
-                                  />
+                                    className="w-28 bg-transparent text-right outline-none"
+                                  >
+                                    {TITLE_FONT_OPTIONS.map(font => (
+                                      <option key={font} value={font}>{font}</option>
+                                    ))}
+                                  </select>
                                 </label>
                                 <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
                                   외곽선
@@ -754,6 +793,18 @@ export default function Panel12Section(props: Props) {
                         step={1}
                         value={Number(ui.finalVideo.subtitleMaxChars || 24)}
                         onChange={(v) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitleMaxChars: Number(v) } }))}
+                        className="w-full accent-emerald-300"
+                      />
+                      <div className="flex items-center justify-between gap-3 pt-1">
+                        <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">자막 글자 크기</label>
+                        <span className="text-[10px] text-emerald-100 font-bold">{Number(ui.finalVideo.subtitleScale || 1).toFixed(2)}x</span>
+                      </div>
+                      <InlineSmoothRange
+                        min={0.7}
+                        max={2.2}
+                        step={0.05}
+                        value={Number(ui.finalVideo.subtitleScale || 1)}
+                        onChange={(v) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitleScale: Number(v) } }))}
                         className="w-full accent-emerald-300"
                       />
                       <div className="flex items-center justify-between gap-3 pt-1">
@@ -996,7 +1047,7 @@ export default function Panel12Section(props: Props) {
                 })}
               </div>
               {ui.finalVideo.url ? (
-                <div className="w-full max-w-[360px] mx-auto bg-black rounded-2xl overflow-hidden relative border border-white/10" style={{ aspectRatio: '9 / 16' }}>
+                <div ref={previewFrameRef} className="w-full max-w-[360px] mx-auto bg-black rounded-2xl overflow-hidden relative border border-white/10" style={{ aspectRatio: '9 / 16' }}>
                   {ui.finalVideo.url.startsWith('data:image') ? (
                     <div className="w-full h-full flex items-center justify-center bg-slate-900">
                       <img src={ui.finalVideo.url} className="w-full h-full object-contain opacity-50" alt="" />
@@ -1008,10 +1059,39 @@ export default function Panel12Section(props: Props) {
                   ) : (
                     <video src={ui.finalVideo.url} controls className="w-full h-full" />
                   )}
+                  <div className="absolute inset-0 pointer-events-none">
+                    <div className="absolute top-0 left-0 right-0 h-[11%] bg-black/18" />
+                    <div className="absolute bottom-0 left-0 right-0 h-[15%] bg-black/18" />
+                    {previewGuideMode === 'shorts' && (
+                      <>
+                        <div className="absolute right-[4%] top-[27%] text-white/80 text-[11px] font-black leading-6 text-right">
+                          <p>👍 2.8M</p><p>👎 2.8M</p><p>💬 2.8M</p><p>↗ 2.8M</p>
+                        </div>
+                        <p className="absolute left-[6%] bottom-[7%] text-white/75 text-[11px] font-black">@Your name</p>
+                      </>
+                    )}
+                    {previewGuideMode === 'reels' && (
+                      <>
+                        <div className="absolute right-[4%] top-[33%] text-white/80 text-[11px] font-black leading-7 text-right">
+                          <p>♡ 2.8M</p><p>◌ 2.8M</p><p>✈ 2.8M</p>
+                        </div>
+                        <p className="absolute left-[6%] bottom-[8%] text-white/75 text-[11px] font-black">@Your name</p>
+                      </>
+                    )}
+                    {previewGuideMode === 'tiktok' && (
+                      <>
+                        <div className="absolute top-[5%] left-0 right-0 text-center text-white/75 text-[10px] font-black">Explore   Following   For You</div>
+                        <div className="absolute right-[4%] top-[36%] text-white/80 text-[11px] font-black leading-7 text-right">
+                          <p>👤</p><p>♥ 2.8M</p><p>💬 2.8M</p><p>🔖 2.8M</p>
+                        </div>
+                        <p className="absolute left-[6%] bottom-[8%] text-white/75 text-[11px] font-black">Your name</p>
+                      </>
+                    )}
+                  </div>
                 </div>
               ) : ui.finalVideo.type === 'image_slide' && ui.finalVideo.slides.length > 0 ? (
                 <div className="w-full space-y-3">
-                  <div className="w-full max-w-[360px] mx-auto bg-black rounded-2xl overflow-hidden relative border border-white/10" style={{ aspectRatio: '9 / 16' }}>
+                  <div ref={previewFrameRef} className="w-full max-w-[360px] mx-auto bg-black rounded-2xl overflow-hidden relative border border-white/10" style={{ aspectRatio: '9 / 16' }}>
                     <AnimatePresence mode="wait">
                       {(() => {
                         const active = ui.finalVideo.slides[ui.finalVideo.activeSlide];
@@ -1039,7 +1119,10 @@ export default function Panel12Section(props: Props) {
                         className={`absolute left-1/2 -translate-x-1/2 -translate-y-1/2 w-[86%] px-4 py-2 rounded-xl border border-white/15 ${ui.finalVideo.subtitlePreset === 'shorts' ? 'bg-black/55' : ui.finalVideo.subtitlePreset === 'docu' ? 'bg-slate-950/70' : 'bg-slate-900/65'}`}
                         style={{ top: `${gridPositionToPercent(ui.finalVideo.subtitleGridPosition)}%` }}
                       >
-                        <p className={`text-xs font-black leading-snug drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)] line-clamp-2 ${ui.finalVideo.subtitlePreset === 'shorts' ? 'text-white' : ui.finalVideo.subtitlePreset === 'docu' ? 'text-slate-100' : 'text-white'}`}>
+                        <p
+                          className={`font-black leading-snug drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)] line-clamp-2 ${ui.finalVideo.subtitlePreset === 'shorts' ? 'text-white' : ui.finalVideo.subtitlePreset === 'docu' ? 'text-slate-100' : 'text-white'}`}
+                          style={{ fontSize: `${previewSubtitleFontPx}px` }}
+                        >
                           {ui.cuts.items[(ui.finalVideo.slides[ui.finalVideo.activeSlide]?.cut || 1) - 1] || ''}
                         </p>
                       </div>
@@ -1051,7 +1134,7 @@ export default function Panel12Section(props: Props) {
                           style={{
                             color: ui.finalVideo.templateTitleLine1Color || '#ff554a',
                             fontFamily: ui.finalVideo.templateTitleFontFamily || 'Pretendard',
-                            transform: `scale(${Number(ui.finalVideo.templateTitleScale || 1)})`,
+                            fontSize: `${previewTitleFontPx}px`,
                           }}
                         >
                           {String(ui.finalVideo.templateTitleText || '').slice(0, 20)}
