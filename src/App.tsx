@@ -126,6 +126,24 @@ const ELEVENLABS_DEFAULT_SETTINGS = {
   use_speaker_boost: true,
 };
 
+const AUTO_FLOW_STEPS = [
+  '대본 생성',
+  'TTS 생성',
+  '컷 분할',
+  '프롬프트 생성',
+  '이미지 자동 생성',
+  '영상 구성',
+  '렌더링',
+  '설명/태그 생성',
+  '완료',
+];
+
+const PRODUCT_FLOW_STEPS = [
+  '상품 분석 중',
+  '자동 제작 중',
+  '완료',
+];
+
 const BGM_LIBRARY: Array<{ label: string; path: string }> = [
   { label: 'Heart Sutra · Buddhism', path: '/audio/bgm/Heart Sutra_Buddhism.MP3' },
   { label: 'Sunday Rollerskate · Product sales', path: '/audio/bgm/Sunday Rollerskate_Product sales.mp3' },
@@ -1669,6 +1687,7 @@ export default function App() {
       step: '',
       lastTitle: '',
       error: '',
+      log: [] as Array<{ at: string; message: string }>,
     },
     productPromo: {
       imageUrl: '',
@@ -1728,6 +1747,31 @@ export default function App() {
     [env.VITE_ADMIN_EMAILS],
   );
   const currentUserEmail = normalizeEmail(youtubeAuth?.email || '');
+
+  const appendAutoLog = (message: string) => {
+    setUi(prev => {
+      const nextLog = [...(prev.autoFlow.log || []), { at: new Date().toISOString(), message }].slice(-6);
+      return { ...prev, autoFlow: { ...prev.autoFlow, log: nextLog } };
+    });
+  };
+
+  const isAutoRunning = ui.autoFlow.running || ui.productPromo.running;
+  const currentAutoStep = ui.autoFlow.running ? ui.autoFlow.step : ui.productPromo.running ? ui.productPromo.step : '';
+  const currentAutoTitle = ui.autoFlow.running ? ui.autoFlow.lastTitle : ui.productPromo.running ? '상품홍보 원클릭' : '';
+  const autoProgress = useMemo(() => {
+    if (ui.autoFlow.running) {
+      const normalized = (ui.autoFlow.step || '').split(' (')[0];
+      const idx = AUTO_FLOW_STEPS.findIndex(step => normalized.startsWith(step));
+      if (idx === -1) return 0.08;
+      return Math.min(1, (idx + 1) / AUTO_FLOW_STEPS.length);
+    }
+    if (ui.productPromo.running) {
+      const idx = PRODUCT_FLOW_STEPS.findIndex(step => (ui.productPromo.step || '').startsWith(step));
+      if (idx === -1) return 0.12;
+      return Math.min(1, (idx + 1) / PRODUCT_FLOW_STEPS.length);
+    }
+    return 0;
+  }, [ui.autoFlow.running, ui.autoFlow.step, ui.productPromo.running, ui.productPromo.step]);
   const effectiveAdminEmails = useMemo(() => {
     const list = [
       ROOT_ADMIN_EMAIL,
@@ -2907,10 +2951,15 @@ ${ui.selectedHookTitle}
     const withRetries = async (label: string, fn: () => Promise<void>, verify: () => boolean, attempts = 2) => {
       for (let i = 0; i < attempts; i += 1) {
         setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: `${label}${attempts > 1 ? ` (${i + 1}/${attempts})` : ''}` } }));
+        appendAutoLog(`${label} 시작${attempts > 1 ? ` (${i + 1}/${attempts})` : ''}`);
         await fn();
         const ok = await waitFor(verify, 50000, 350);
-        if (ok) return;
+        if (ok) {
+          appendAutoLog(`${label} 완료`);
+          return;
+        }
       }
+      appendAutoLog(`${label} 실패`);
       throw new Error(`${label} 실패`);
     };
 
@@ -2923,6 +2972,7 @@ ${ui.selectedHookTitle}
         step: '대본 생성',
         lastTitle: title,
         error: '',
+        log: [...(prev.autoFlow.log || []), { at: new Date().toISOString(), message: `원클릭 자동 제작 시작: ${title}` }].slice(-6),
       },
     }));
 
@@ -3101,6 +3151,7 @@ ${ui.selectedHookTitle}
       }));
 
       setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, running: false, step: '완료', error: '' } }));
+      appendAutoLog('원클릭 자동 제작 완료');
       alert('원클릭 자동 제작이 완료되었습니다. 14번 패널에서 예약/발행을 진행하세요.');
       return true;
     } catch (err: any) {
@@ -3124,6 +3175,7 @@ ${ui.selectedHookTitle}
           error: userError,
         },
       }));
+      appendAutoLog(`원클릭 자동 제작 실패: ${userError}`);
       alert(userError);
       return false;
     } finally {
@@ -3167,6 +3219,10 @@ ${ui.selectedHookTitle}
         step: '상품 분석 중',
         error: '',
         autoQueuePending: false,
+      },
+      autoFlow: {
+        ...prev.autoFlow,
+        log: [...(prev.autoFlow.log || []), { at: new Date().toISOString(), message: '상품홍보 원클릭 시작' }].slice(-6),
       },
     }));
 
@@ -3278,6 +3334,7 @@ JSON만 반환:
           p14: true,
         },
       }));
+      appendAutoLog('상품홍보 원클릭 완료');
 
       if (latestUiRef.current?.productPromo?.autoQueuePublish) {
         const scheduleMinutes = [30, 60, 120].includes(Number(latestUiRef.current?.productPromo?.autoScheduleMinutes))
@@ -3306,6 +3363,7 @@ JSON만 반환:
           autoQueuePending: false,
         },
       }));
+      appendAutoLog('상품홍보 원클릭 실패: 자동 제작 오류');
       alert('상품 자동 제작에 실패했습니다. 다시 시도해 주세요.');
     }
   };
@@ -5700,6 +5758,36 @@ ${JSON.stringify(cutPayload)}`,
           </div>
         </div>
       </section>
+
+      {isAutoRunning && (
+        <>
+          <div className="fixed inset-0 bg-slate-950/40 animate-pulse pointer-events-none z-30" />
+          <div className="sticky top-3 z-40 px-3">
+            <div className="max-w-5xl mx-auto bg-slate-950/80 border border-cyan-400/20 rounded-2xl p-3 shadow-lg shadow-cyan-500/10 backdrop-blur-xl">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[10px] font-black text-cyan-300 uppercase tracking-widest">자동 진행 중</p>
+                  <p className="text-xs text-slate-200 font-bold truncate">{currentAutoTitle || '자동화 진행'}</p>
+                </div>
+                <div className="text-[11px] text-slate-300">
+                  현재 단계: <span className="text-cyan-300 font-bold">{currentAutoStep || '준비 중'}</span>
+                </div>
+              </div>
+              <div className="mt-2 h-2 bg-white/10 rounded-full overflow-hidden">
+                <div className="h-full bg-cyan-400 transition-all" style={{ width: `${Math.round(autoProgress * 100)}%` }} />
+              </div>
+              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] text-slate-300">
+                {(ui.autoFlow.log?.length ? ui.autoFlow.log : [{ at: '', message: '최근 로그 없음' }]).slice(-4).map((log, idx) => (
+                  <div key={`${log.at}-${idx}`} className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5">
+                    <p className="text-slate-200 font-bold">{log.message}</p>
+                    {log.at && <p className="text-[9px] text-slate-500 mt-0.5">{new Date(log.at).toLocaleTimeString()}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       <main className="max-w-5xl mx-auto space-y-8">
         {/* 1. 유튜브 검색 */}
