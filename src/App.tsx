@@ -5397,7 +5397,7 @@ ${JSON.stringify(cutPayload)}`,
           </section>
         </div>
       )}
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
+      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-12">
         <div className="flex items-center gap-4">
           <div className="p-3 bg-amber-500 rounded-2xl shadow-lg shadow-amber-500/20">
             <Sparkles className="w-8 h-8 text-black" />
@@ -5408,63 +5408,67 @@ ${JSON.stringify(cutPayload)}`,
             <p className="text-[10px] text-slate-500 font-mono mt-1">Build: {appBuildId}</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <ApiStatusBar items={apiStatusItems} />
-          <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-full border border-white/10 bg-white/5">
-            <span className={`w-2 h-2 rounded-full ${hasValidYouTubeAuth ? 'bg-emerald-400' : 'bg-slate-500'}`} />
-            <span className="text-[11px] font-bold text-slate-200">{currentUserEmail || '로그인 안됨'}</span>
-            {hasValidYouTubeAuth ? (
-              <button
-                onClick={disconnectYouTubeAccount}
-                className="text-[10px] px-2 py-1 rounded-md bg-white/10 hover:bg-white/20"
-              >
-                로그아웃
-              </button>
-            ) : (
-              <button
-                onClick={() => connectYouTubeAccount('login')}
-                className="text-[10px] px-2 py-1 rounded-md bg-cyan-500 text-black font-black"
-              >
-                로그인
-              </button>
-            )}
-          </div>
-          <button
-            onClick={handleNewProject}
-            className="flex items-center gap-2 bg-cyan-500/20 border border-cyan-300/30 text-cyan-100 px-5 py-2.5 rounded-full hover:bg-cyan-500/30 transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="text-sm font-bold">새프로젝트</span>
-          </button>
-          <button 
-            onClick={() => setUi(prev => ({ ...prev, happyDayOpen: true }))}
-            className="bg-gradient-to-r from-orange-500 to-pink-500 text-white text-xs font-black px-5 py-2.5 rounded-full shadow-lg hover:brightness-110 transition-all"
-          >
-            🛍️ Happy Day 구경
-          </button>
-          <button 
-            onClick={saveProject}
-            disabled={!isApprovedUser}
-            className="flex items-center gap-2 bg-white/5 border border-white/10 px-5 py-2.5 rounded-full hover:bg-white/10 transition-all disabled:opacity-40"
-          >
-            <Save className="w-4 h-4" />
-            <span className="text-sm font-bold">프로젝트 저장</span>
-          </button>
-          <label className="relative group flex items-center gap-2 bg-white/5 border border-white/10 px-5 py-2.5 rounded-full hover:bg-white/10 transition-all cursor-pointer">
-            <Download className="w-4 h-4" />
-            <span className="text-sm font-bold">불러오기</span>
-            <input type="file" accept=".zip,.json,application/zip" onChange={loadProject} className="hidden" />
-            <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-72 -translate-x-1/2 rounded-xl border border-amber-300/40 bg-[#10192f] p-3 text-[10px] text-amber-100 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
-              ZIP 또는 JSON 프로젝트를 불러올 수 있습니다. ZIP은 내부 project.json을 자동 탐색합니다.
+        <div className="flex flex-col gap-3 w-full lg:w-auto">
+          <div className="flex items-center gap-3">
+            <ApiStatusBar items={apiStatusItems} />
+            <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-full border border-white/10 bg-white/5">
+              <span className={`w-2 h-2 rounded-full ${hasValidYouTubeAuth ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+              <span className="text-[11px] font-bold text-slate-200">{currentUserEmail || '로그인 안됨'}</span>
+              {hasValidYouTubeAuth ? (
+                <button
+                  onClick={disconnectYouTubeAccount}
+                  className="text-[10px] px-2 py-1 rounded-md bg-white/10 hover:bg-white/20"
+                >
+                  로그아웃
+                </button>
+              ) : (
+                <button
+                  onClick={() => connectYouTubeAccount('login')}
+                  className="text-[10px] px-2 py-1 rounded-md bg-cyan-500 text-black font-black"
+                >
+                  로그인
+                </button>
+              )}
             </div>
-          </label>
-          <button 
-            onClick={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
-            className="flex items-center gap-2 bg-white/5 border border-white/10 px-5 py-2.5 rounded-full hover:bg-white/10 transition-all"
-          >
-            <Settings className="w-4 h-4" />
-            <span className="text-sm font-bold">API 설정</span>
-          </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:flex lg:flex-wrap items-stretch gap-2">
+            <button
+              onClick={handleNewProject}
+              className="w-full lg:w-auto flex items-center justify-center gap-2 bg-cyan-500/20 border border-cyan-300/30 text-cyan-100 px-4 py-2.5 rounded-full hover:bg-cyan-500/30 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="text-sm font-bold">새프로젝트</span>
+            </button>
+            <button 
+              onClick={() => setUi(prev => ({ ...prev, happyDayOpen: true }))}
+              className="w-full lg:w-auto bg-gradient-to-r from-orange-500 to-pink-500 text-white text-xs font-black px-4 py-2.5 rounded-full shadow-lg hover:brightness-110 transition-all"
+            >
+              🛍️ Happy Day 구경
+            </button>
+            <button 
+              onClick={saveProject}
+              disabled={!isApprovedUser}
+              className="w-full lg:w-auto flex items-center justify-center gap-2 bg-white/5 border border-white/10 px-4 py-2.5 rounded-full hover:bg-white/10 transition-all disabled:opacity-40"
+            >
+              <Save className="w-4 h-4" />
+              <span className="text-sm font-bold">프로젝트 저장</span>
+            </button>
+            <label className="relative group w-full lg:w-auto flex items-center justify-center gap-2 bg-white/5 border border-white/10 px-4 py-2.5 rounded-full hover:bg-white/10 transition-all cursor-pointer">
+              <Download className="w-4 h-4" />
+              <span className="text-sm font-bold">불러오기</span>
+              <input type="file" accept=".zip,.json,application/zip" onChange={loadProject} className="hidden" />
+              <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-72 -translate-x-1/2 rounded-xl border border-amber-300/40 bg-[#10192f] p-3 text-[10px] text-amber-100 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
+                ZIP 또는 JSON 프로젝트를 불러올 수 있습니다. ZIP은 내부 project.json을 자동 탐색합니다.
+              </div>
+            </label>
+            <button 
+              onClick={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
+              className="w-full lg:w-auto flex items-center justify-center gap-2 bg-white/5 border border-white/10 px-4 py-2.5 rounded-full hover:bg-white/10 transition-all"
+            >
+              <Settings className="w-4 h-4" />
+              <span className="text-sm font-bold">API 설정</span>
+            </button>
+          </div>
         </div>
       </header>
 
