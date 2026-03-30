@@ -1542,6 +1542,7 @@ export default function App() {
       tone: '정보형, 설득력',
       output: '',
       generating: false,
+      lastError: '',
     },
     tts: {
       generating: false,
@@ -1693,6 +1694,7 @@ export default function App() {
         scriptType: 'shorts' as 'shorts' | 'long-form',
         scriptLength: '60초',
         scriptLang: 'KR' as 'KR' | 'EN' | 'JP',
+        subjectContext: '',
         videoStyle: '01. 뉴스/다큐',
         ttsProvider: 'gemini' as 'gemini' | 'elevenlabs',
         ttsVoice: 'Kore',
@@ -1705,6 +1707,9 @@ export default function App() {
       imageUrl: '',
       productUrl: '',
       productComment: '',
+      visualAnchor: '',
+      detectedTexts: '',
+      preferredTtsProvider: 'elevenlabs' as 'gemini' | 'elevenlabs',
       running: false,
       step: '',
       error: '',
@@ -1722,6 +1727,7 @@ export default function App() {
   const abortRef = useRef<boolean>(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const elevenlabsVoiceMapRef = useRef<Record<string, string> | null>(null);
+  const ttsProviderLockRef = useRef<'gemini' | 'elevenlabs' | null>(null);
   const taskAbortRef = useRef({
     hooks: false,
     thumbnail: false,
@@ -1734,6 +1740,7 @@ export default function App() {
   });
   const [autoImageBatchRunning, setAutoImageBatchRunning] = useState(false);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string>('');
   const publishRetryTimersRef = useRef<Record<string, number[]>>({});
   const [youtubeAuth, setYoutubeAuth] = useState<YouTubeAuthSession | null>(null);
   const latestUiRef = useRef<any>(ui);
@@ -1768,8 +1775,28 @@ export default function App() {
   };
 
   const isAutoRunning = ui.autoFlow.running || ui.productPromo.running;
+  const isManualRunning = !isAutoRunning && (
+    ui.script.generating ||
+    ui.hookLoading ||
+    ui.thumbnail.generating ||
+    ui.cuts.splitting ||
+    ui.tts.generating ||
+    ui.tts.status === '프롬프트 생성 중...' ||
+    autoImageBatchRunning ||
+    ui.finalVideo.generating ||
+    ui.description.generating
+  );
   const currentAutoStep = ui.autoFlow.running ? ui.autoFlow.step : ui.productPromo.running ? ui.productPromo.step : '';
   const currentAutoTitle = ui.autoFlow.running ? ui.autoFlow.lastTitle : ui.productPromo.running ? '상품홍보 원클릭' : '';
+  const currentManualStep = ui.script.generating ? '대본 생성' :
+    ui.hookLoading ? '훅 제목 생성' :
+    ui.thumbnail.generating ? '썸네일 생성' :
+    ui.cuts.splitting ? '컷 분할' :
+    ui.tts.status === '프롬프트 생성 중...' ? '프롬프트 생성' :
+    ui.tts.generating ? `TTS 생성${ttsProviderLockRef.current ? ` (${ttsProviderLockRef.current})` : ''}` :
+    autoImageBatchRunning ? '이미지 자동 생성' :
+    ui.finalVideo.generating ? '렌더링' :
+    ui.description.generating ? '설명/태그 생성' : '';
   const isOneClickFixed = Boolean(ui.autoFlow.fixedEnabled);
   const autoProgress = useMemo(() => {
     if (ui.autoFlow.running) {
@@ -2462,7 +2489,7 @@ JSON 형식으로만 출력하세요:
     }
     if (!keys.g1 || !ui.selectedHookTitle) return alert('제목을 선택하고 Gemini 키를 확인하세요.');
     taskAbortRef.current.script = false;
-    setUi(prev => ({ ...prev, script: { ...prev.script, generating: true } }));
+    setUi(prev => ({ ...prev, script: { ...prev.script, generating: true, lastError: '' } }));
 
     try {
       const ai = new GoogleGenAI({ apiKey: keys.g1 });
@@ -2501,6 +2528,7 @@ ${ui.selectedHookTitle}
 - 언어: ${ui.script.lang}
 - 타깃 시청자: ${ui.script.targetAudience}
 - 톤 & 분위기: ${ui.script.tone}
+- 주제 상황설명: ${ui.autoFlow.fixedEnabled ? (ui.autoFlow.fixed.subjectContext || '미입력') : '미사용'}
 
 [요청 사항]
 위 설정에 맞춰 대본을 작성하세요. 
@@ -2522,10 +2550,11 @@ ${ui.selectedHookTitle}
       const finalScript = ui.script.type === 'shorts'
         ? trimScriptToUnitLimit(rawScript, lang, shortsLimit.maxUnits)
         : rawScript;
-      setUi(prev => ({ ...prev, script: { ...prev.script, output: finalScript, generating: false } }));
+      setUi(prev => ({ ...prev, script: { ...prev.script, output: finalScript, generating: false, lastError: '' } }));
     } catch (err) {
       console.error(err);
-      setUi(prev => ({ ...prev, script: { ...prev.script, generating: false } }));
+      const message = err instanceof Error ? err.message : String(err || 'script-error');
+      setUi(prev => ({ ...prev, script: { ...prev.script, generating: false, lastError: message } }));
     }
   };
 
@@ -2567,6 +2596,54 @@ JSON만 반환:
     } catch (err) {
       console.error(err);
       return null;
+    }
+  };
+
+  const mergeToneWithContext = (baseTone: string, context: string) => {
+    const cleanedTone = String(baseTone || '').replace(/\s*·\s*상황설명:\s*.*$/u, '').trim();
+    const cleanedContext = String(context || '').trim();
+    if (!cleanedContext) return cleanedTone;
+    return `${cleanedTone} · 상황설명: ${cleanedContext.slice(0, 120)}`;
+  };
+
+  const autoSelectProductVoice = async (tone: string, audience: string) => {
+    if (!keys.g1) return;
+    try {
+      const ai = new GoogleGenAI({ apiKey: keys.g1 });
+      const voiceList = GEMINI_TTS_VOICES.map(v => `${v.id}: ${v.label}`).join(', ');
+      const elevenList = ELEVENLABS_VOICES.map(v => `${v.id}: ${v.label}`).join(', ');
+      const prompt = `상품홍보 쇼츠 음성 연출가로서 아래 조건에 맞는 TTS 엔진과 보이스를 고르세요.
+[톤] ${tone}
+[타깃] ${audience}
+[Gemini 보이스] ${voiceList}
+[ElevenLabs 보이스] ${elevenList}
+JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
+      const res = await generateContentWithFallback(ai, {
+        model: 'gemini-3-flash-preview',
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+      const parsed = JSON.parse(res.text || '{}');
+      const provider = String(parsed?.provider || 'gemini').toLowerCase() === 'elevenlabs' ? 'elevenlabs' : 'gemini';
+      const voice = String(parsed?.voice || '').trim();
+      setUi(prev => ({
+        ...prev,
+        tts: {
+          ...prev.tts,
+          voice: provider === 'gemini'
+            ? (GEMINI_TTS_VOICES.some(v => v.id === voice) ? voice : prev.tts.voice)
+            : prev.tts.voice,
+          elevenlabsVoice: provider === 'elevenlabs'
+            ? (ELEVENLABS_VOICES.some(v => v.id === voice) ? voice : prev.tts.elevenlabsVoice)
+            : prev.tts.elevenlabsVoice,
+        },
+        productPromo: {
+          ...prev.productPromo,
+          preferredTtsProvider: provider,
+        },
+      }));
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -2766,10 +2843,41 @@ JSON만 반환:
     };
   }, [ui.tts.audioUrl]);
 
-  const buildCleanTtsScript = (raw: string) => raw
-    .replace(/^[a-zA-Z\s]+:\s*/gm, '')
-    .replace(/\(.*\)/g, '')
-    .trim();
+  const normalizeKoreanNumeralsForTts = (text: string) => {
+    const units = ['', '십', '백', '천'];
+    const nums = ['영', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구'];
+    const toHangul = (n: number) => {
+      if (!Number.isFinite(n)) return '';
+      if (n === 0) return '영';
+      const str = String(Math.floor(Math.abs(n)));
+      let out = '';
+      for (let i = 0; i < str.length; i += 1) {
+        const digit = Number(str[i]);
+        const unit = units[(str.length - 1 - i) % 4];
+        if (digit === 0) continue;
+        if (digit === 1 && unit) out += unit;
+        else out += `${nums[digit]}${unit}`;
+      }
+      return out || '영';
+    };
+
+    return text
+      .replace(/(\d{3,4})년/g, (_, y) => `${toHangul(Number(y))}년`)
+      .replace(/\b5곳\b/g, '다섯 곳')
+      .replace(/\b5개\b/g, '다섯 개')
+      .replace(/\b10개\b/g, '열 개');
+  };
+
+  const buildCleanTtsScript = (raw: string, lang?: 'KR' | 'EN' | 'JP') => {
+    const cleaned = raw
+      .replace(/^[a-zA-Z\s]+:\s*/gm, '')
+      .replace(/\(.*\)/g, '')
+      .trim();
+    if (lang === 'KR') {
+      return normalizeKoreanNumeralsForTts(cleaned);
+    }
+    return cleaned;
+  };
 
   const loadElevenLabsVoiceMap = async (apiKey: string) => {
     const res = await fetch('https://api.elevenlabs.io/v1/voices', {
@@ -2808,24 +2916,47 @@ JSON만 반환:
     throw new Error('ElevenLabs 보이스 ID를 찾지 못했습니다. API 설정 또는 보이스 이름을 확인해 주세요.');
   };
 
+  const tryStartTtsProvider = (provider: 'gemini' | 'elevenlabs') => {
+    if (ttsProviderLockRef.current && ttsProviderLockRef.current !== provider) {
+      alert(`다른 TTS(${ttsProviderLockRef.current}) 생성이 진행 중입니다. 잠시 후 다시 시도하세요.`);
+      return false;
+    }
+    ttsProviderLockRef.current = provider;
+    return true;
+  };
+
+  const finishTtsProvider = (provider: 'gemini' | 'elevenlabs') => {
+    if (ttsProviderLockRef.current === provider) {
+      ttsProviderLockRef.current = null;
+    }
+  };
+
   const handleGenerateGeminiTTS = async () => {
     if (ui.tts.generating) {
-      taskAbortRef.current.tts = true;
-      setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, status: '중지됨' } }));
+      if (ttsProviderLockRef.current === 'gemini') {
+        taskAbortRef.current.tts = true;
+        setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, status: '중지됨' } }));
+      } else {
+        alert('다른 TTS 생성이 진행 중입니다.');
+      }
       return;
     }
     if (!keys.g1 || !ui.script.output) return alert('대본을 먼저 생성하세요.');
+    if (!tryStartTtsProvider('gemini')) return;
     taskAbortRef.current.tts = false;
-    setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: true, status: '생성 중...' } }));
+    setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: true, status: 'Gemini 생성 중...' } }));
 
     try {
       const ai = new GoogleGenAI({ apiKey: keys.g1 });
       
-      const cleanScript = buildCleanTtsScript(ui.script.output);
+      const cleanScript = buildCleanTtsScript(ui.script.output, (ui.script.lang as any) || 'KR');
 
-      const promptText = ui.tts.styleInstructions 
-        ? `[Style: ${ui.tts.styleInstructions}]\n${cleanScript}`
-        : cleanScript;
+      const numberPronunciationRule = ui.script.lang === 'KR'
+        ? '숫자는 한국어 자연 발화로 읽어야 합니다. 예: 2020년=이천이십년, 5곳=다섯 곳, 10개=열 개.'
+        : '';
+      const promptText = ui.tts.styleInstructions
+        ? `[Style: ${ui.tts.styleInstructions}]\n${numberPronunciationRule}\n${cleanScript}`
+        : `${numberPronunciationRule}\n${cleanScript}`;
 
       const response = await generateContentWithFallback(ai, {
         model: ui.tts.model || "gemini-2.5-flash-preview-tts",
@@ -2847,26 +2978,33 @@ JSON만 반환:
           return;
         }
         const url = addWavHeader(base64Audio);
-        setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, audioUrl: url, status: '완료' } }));
+        setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, audioUrl: url, status: 'Gemini 완료' } }));
       }
     } catch (err) {
       console.error(err);
-      setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, status: '실패' } }));
+      setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, status: 'Gemini 실패' } }));
+    } finally {
+      finishTtsProvider('gemini');
     }
   };
 
   const handleGenerateElevenLabsTTS = async () => {
     if (ui.tts.generating) {
-      taskAbortRef.current.tts = true;
-      setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, status: '중지됨' } }));
+      if (ttsProviderLockRef.current === 'elevenlabs') {
+        taskAbortRef.current.tts = true;
+        setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, status: '중지됨' } }));
+      } else {
+        alert('다른 TTS 생성이 진행 중입니다.');
+      }
       return;
     }
     if (!keys.e11 || !ui.script.output) return alert('대본을 먼저 생성하세요.');
+    if (!tryStartTtsProvider('elevenlabs')) return;
     taskAbortRef.current.tts = false;
-    setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: true, status: '생성 중...' } }));
+    setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: true, status: 'ElevenLabs 생성 중...' } }));
 
     try {
-      const cleanScript = buildCleanTtsScript(ui.script.output);
+      const cleanScript = buildCleanTtsScript(ui.script.output, (ui.script.lang as any) || 'KR');
       const resolvedVoiceId = await resolveElevenLabsVoiceId(keys.e11, ui.tts.elevenlabsVoice);
       const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${resolvedVoiceId}`, {
         method: 'POST',
@@ -2894,10 +3032,12 @@ JSON만 반환:
 
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
-      setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, audioUrl: url, status: '완료' } }));
+      setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, audioUrl: url, status: 'ElevenLabs 완료' } }));
     } catch (err) {
       console.error(err);
-      setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, status: '실패' } }));
+      setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, status: 'ElevenLabs 실패' } }));
+    } finally {
+      finishTtsProvider('elevenlabs');
     }
   };
 
@@ -2948,11 +3088,15 @@ JSON만 반환:
       : prompts;
     for (const cut of queue) {
       if (abortRef.current) break;
+      const existing = latestUiRef.current?.imageJobs?.find((j: any) => j.cut === cut.index);
+      if (existing?.imageUrl) {
+        continue;
+      }
       let ok = false;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         if (abortRef.current) break;
         try {
-          await generateImage(cut.index);
+          await generateImage(cut.index, { force: false });
           const job = latestUiRef.current?.imageJobs?.find((j: any) => j.cut === cut.index);
           if (job?.imageUrl) {
             ok = true;
@@ -3028,6 +3172,46 @@ JSON만 반환:
           throw new Error('컷 분할 재시도 제한 시간 초과');
         }
         appendAutoLog('컷 분할 재시도 대기(30초)');
+        await waitDelay(30000);
+      }
+    };
+
+    const scriptReady = () => {
+      const text = String(latestUiRef.current?.script?.output || '').trim();
+      if (!text) return false;
+      const normalized = normalizeSubtitleText(text);
+      if (latestUiRef.current?.script?.type === 'shorts') {
+        return normalized.replace(/\s/g, '').length >= 60;
+      }
+      return normalized.replace(/\s/g, '').length >= 300;
+    };
+
+    const ensureScriptReady = async () => {
+      let rounds = 0;
+      const started = Date.now();
+      const isHardScriptFailure = () => {
+        const message = String(latestUiRef.current?.script?.lastError || '').toLowerCase();
+        if (!message) return false;
+        return ['api key', 'apikey', 'unauthorized', 'forbidden', 'permission', 'quota', 'rate limit', '429', '401', '403', 'invalid'].some(token => message.includes(token));
+      };
+      while (true) {
+        for (let i = 0; i < 3; i += 1) {
+          appendAutoLog(`대본 생성 시도 (${rounds * 3 + i + 1})`);
+          await actionApiRef.current.generateScript();
+          const ok = await waitFor(scriptReady, 60000, 350);
+          if (ok) {
+            appendAutoLog('대본 생성 완료');
+            return;
+          }
+          if (isHardScriptFailure()) {
+            throw new Error(`대본 생성 하드 실패: ${latestUiRef.current?.script?.lastError || 'API/권한 오류'}`);
+          }
+        }
+        rounds += 1;
+        if (Date.now() - started > 20 * 60 * 1000) {
+          throw new Error('대본 생성 재시도 제한 시간 초과');
+        }
+        appendAutoLog('대본 재시도 대기(30초)');
         await waitDelay(30000);
       }
     };
@@ -3119,7 +3303,7 @@ JSON만 반환:
       await new Promise(r => setTimeout(r, 0));
       const fixedEnabled = Boolean(latestUiRef.current?.autoFlow?.fixedEnabled);
       const fixed = latestUiRef.current?.autoFlow?.fixed;
-      if (fixedEnabled && fixed && !opts?.productMode) {
+      if (fixedEnabled && fixed) {
         setUi(prev => ({
           ...prev,
           script: {
@@ -3127,6 +3311,7 @@ JSON만 반환:
             type: fixed.scriptType || prev.script.type,
             length: fixed.scriptLength || prev.script.length,
             lang: fixed.scriptLang || prev.script.lang,
+            tone: mergeToneWithContext(prev.script.tone, fixed.subjectContext),
           },
           videoStyle: {
             ...prev.videoStyle,
@@ -3163,7 +3348,7 @@ JSON만 반환:
             script: {
               ...prev.script,
               targetAudience: inferred.audience || prev.script.targetAudience,
-              tone: inferred.tone || prev.script.tone,
+              tone: mergeToneWithContext((inferred.tone || prev.script.tone), fixed.subjectContext),
             },
           }));
           await new Promise(r => setTimeout(r, 0));
@@ -3178,25 +3363,23 @@ JSON만 반환:
             ...prev.script,
             type: 'shorts',
             length: '20초',
-            lang: 'KR',
-            tone: '상품홍보, 후킹형',
+            lang: fixedEnabled && fixed ? (fixed.scriptLang || 'KR') : 'KR',
+            tone: mergeToneWithContext('상품홍보, 후킹형', fixedEnabled && fixed ? fixed.subjectContext : ''),
           },
           finalVideo: {
             ...prev.finalVideo,
             type: productRenderMode,
             useHybridHookVideos: productRenderMode === 'image_slide' ? productHookVideoCount > 0 : prev.finalVideo.useHybridHookVideos,
             hookVideoCount: productRenderMode === 'image_slide' ? productHookVideoCount : prev.finalVideo.hookVideoCount,
+            bgmEnabled: fixedEnabled && fixed ? Boolean(fixed.bgmTrack) : prev.finalVideo.bgmEnabled,
+            bgmTrack: fixedEnabled && fixed ? (fixed.bgmTrack || prev.finalVideo.bgmTrack) : prev.finalVideo.bgmTrack,
+            bgmTrackUserSelected: fixedEnabled && fixed ? true : prev.finalVideo.bgmTrackUserSelected,
           },
         }));
         await new Promise(r => setTimeout(r, 0));
       }
 
-      await withRetries(
-        '대본 생성',
-        () => actionApiRef.current.generateScript(),
-        () => Boolean(latestUiRef.current?.script?.output?.trim()),
-        2,
-      );
+      await ensureScriptReady();
 
       if (opts?.productMode) {
         const lang = (['KR', 'EN', 'JP'].includes(latestUiRef.current?.script?.lang) ? latestUiRef.current?.script?.lang : 'KR') as 'KR' | 'EN' | 'JP';
@@ -3221,12 +3404,56 @@ JSON만 반환:
       }
 
       try {
-        await withRetries(
-          'TTS 생성',
-          () => actionApiRef.current.handleGenerateTTS(ttsProvider),
-          () => Boolean(latestUiRef.current?.tts?.audioUrl),
-          2,
-        );
+        if (opts?.productMode) {
+          const preferredProductProvider: 'gemini' | 'elevenlabs' =
+            fixedEnabled && fixed
+              ? (fixed.ttsProvider === 'elevenlabs' ? 'elevenlabs' : 'gemini')
+              : ((latestUiRef.current?.productPromo?.preferredTtsProvider === 'elevenlabs') ? 'elevenlabs' : 'gemini');
+          let elevenOk = false;
+          if (preferredProductProvider === 'elevenlabs' && keys.e11) {
+            try {
+              await withRetries(
+                'TTS 생성(ElevenLabs)',
+                () => actionApiRef.current.handleGenerateTTS('elevenlabs'),
+                () => Boolean(latestUiRef.current?.tts?.audioUrl) && String(latestUiRef.current?.tts?.status || '').includes('ElevenLabs 완료'),
+                2,
+              );
+              elevenOk = true;
+            } catch {
+              appendAutoLog('ElevenLabs 실패, Gemini로 전환');
+            }
+          }
+          if (!elevenOk) {
+            await withRetries(
+              'TTS 생성(Gemini)',
+              () => actionApiRef.current.handleGenerateTTS('gemini'),
+              () => Boolean(latestUiRef.current?.tts?.audioUrl) && String(latestUiRef.current?.tts?.status || '').includes('Gemini 완료'),
+              2,
+            );
+          }
+        } else {
+          const preferred = ttsProvider === 'elevenlabs' && !keys.e11 ? 'gemini' : ttsProvider;
+          try {
+            await withRetries(
+              `TTS 생성(${preferred})`,
+              () => actionApiRef.current.handleGenerateTTS(preferred),
+              () => Boolean(latestUiRef.current?.tts?.audioUrl),
+              2,
+            );
+          } catch (primaryErr) {
+            if (preferred === 'elevenlabs') {
+              appendAutoLog('ElevenLabs 실패, Gemini로 자동 전환');
+              await withRetries(
+                'TTS 생성(gemini)',
+                () => actionApiRef.current.handleGenerateTTS('gemini'),
+                () => Boolean(latestUiRef.current?.tts?.audioUrl),
+                2,
+              );
+            } else {
+              throw primaryErr;
+            }
+          }
+        }
       } catch (ttsErr) {
         if (!opts?.productMode || !latestUiRef.current?.tts?.audioUrl) {
           throw ttsErr;
@@ -3240,9 +3467,12 @@ JSON만 반환:
         setUi(prev => ({ ...prev, script: { ...prev.script, output: stricter } }));
         await new Promise(r => setTimeout(r, 0));
         try {
+          const effectiveProvider: 'gemini' | 'elevenlabs' = String(latestUiRef.current?.tts?.status || '').includes('ElevenLabs')
+            ? 'elevenlabs'
+            : 'gemini';
           await withRetries(
             'TTS 재생성(20초 보정)',
-            () => actionApiRef.current.handleGenerateTTS(ttsProvider),
+            () => actionApiRef.current.handleGenerateTTS(effectiveProvider),
             () => Boolean(latestUiRef.current?.tts?.audioUrl) && Number(latestUiRef.current?.tts?.measuredDuration || 0) <= 20,
             2,
           );
@@ -3456,9 +3686,11 @@ ${trendContext || '데이터 없음(검색 미실행)'}
 2) 과장/낚시 금지, 즉시 구매욕을 자극하는 후킹 문장
 3) 타깃은 한국 사용자
 4) 20초 이하 쇼츠에 맞는 압축 정보
+5) 이미지 속 제품의 핵심 물성/형태/색상/패키지 텍스트를 최대한 정확히 분석
+6) 후속 이미지 생성에서 제품 자체는 유지하고 주변 환경만 바꾸도록 지시할 수 있는 앵커 문구 생성
 
 JSON만 반환:
-{"hookTitle":"...","tone":"...","audience":"...","scriptHint":"...","visualGuide":"..."}`,
+{"hookTitle":"...","tone":"...","audience":"...","scriptHint":"...","visualGuide":"...","productAnchor":"...","detectedTexts":"..."}`,
               },
               { inlineData: { mimeType, data: imageBase64 } },
             ],
@@ -3487,8 +3719,17 @@ JSON만 반환:
         productPromo: {
           ...prev.productPromo,
           step: '자동 제작 중',
+          visualAnchor: String(parsed?.productAnchor || ''),
+          detectedTexts: String(parsed?.detectedTexts || ''),
         },
       }));
+
+      if (!latestUiRef.current?.autoFlow?.fixedEnabled) {
+        await autoSelectProductVoice(
+          String(parsed?.tone || '상품홍보, 후킹형'),
+          String(parsed?.audience || '20~40대 일반'),
+        );
+      }
 
       const ok = await runOneClickFromTitle(hookTitle, {
         productMode: true,
@@ -3597,6 +3838,8 @@ JSON만 반환:
       const isProductPromoContext = Boolean(ui.productPromo.imageUrl) && (ui.productPromo.running || /상품홍보|커머스|판매|제품/.test(ui.script.tone || ''));
       const promoUrl = (ui.productPromo.productUrl || '').trim();
       const promoComment = (ui.productPromo.productComment || '').trim();
+      const promoVisualAnchor = (ui.productPromo.visualAnchor || '').trim();
+      const promoDetectedTexts = (ui.productPromo.detectedTexts || '').trim();
       const trendContext = (results || [])
         .slice(0, 6)
         .map((r: any, i: number) => `${i + 1}) ${r.title}`)
@@ -3605,7 +3848,7 @@ JSON만 반환:
       const fallbackPromptFromCut = (cutText: string) => {
         const seed = normalizeSubtitleText(cutText || 'product close-up scene') || 'product close-up scene';
         if (isProductPromoContext) {
-          return `Korean e-commerce commercial scene, Korean background in Seoul, Korean model, product focus on ${seed}, all visible text in Korean Hangul only, premium lighting, high detail, no English letters.`;
+          return `Korean e-commerce commercial scene, Korean background in Seoul, Korean model, product focus on ${seed}. Keep the same product shape/color/package as reference product image. ${promoVisualAnchor ? `Product anchor: ${promoVisualAnchor}.` : ''} ${promoDetectedTexts ? `Package text hint: ${promoDetectedTexts}.` : ''} all visible text in Korean Hangul only, premium lighting, high detail, no English letters.`;
         }
         return `Cinematic product advertisement scene, focus on ${seed}, premium lighting, clean background, dynamic composition, high detail, no text, no letters.`;
       };
@@ -3631,6 +3874,12 @@ ${promoUrl || '미입력'}
 [상품 코멘트]
 ${promoComment || '미입력'}
 
+[상품 이미지 앵커]
+${promoVisualAnchor || '미분석'}
+
+[상품 패키지 텍스트(OCR)]
+${promoDetectedTexts || '미추출'}
+
 [YouTube 트렌드 참고]
 ${trendContext || '데이터 없음'}
 
@@ -3642,7 +3891,8 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
 2. ${isProductPromoContext ? '텍스트가 필요하면 한국어(한글)만 사용하고, 영어/일본어/중국어 텍스트는 금지하세요.' : '절대 화면에 텍스트나 문자가 포함되지 않게 하세요 (NO TEXT, NO LETTERS).'}
 3. 인물의 외모, 의상, 환경이 전체 영상에서 일관되게 유지되도록 묘사하세요.
 4. ${isProductPromoContext ? '한국인/한국 배경/한국어 로케일 조건을 반드시 반영하세요.' : '위 조건을 유지하세요.'}
-5. 불필요한 설명 없이 1~2문장의 영어 프롬프트만 출력하세요.`;
+6. ${isProductPromoContext ? '상품 자체(형태/색/패키지/로고 텍스트)는 원본 제품 이미지와 최대한 동일하게 유지하고, 주변 환경/배경/구도만 변경하세요.' : '위 조건을 유지하세요.'}
+7. 불필요한 설명 없이 1~2문장의 영어 프롬프트만 출력하세요.`;
 
         try {
           const res = await generateContentWithFallback(ai, {
@@ -4532,10 +4782,15 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
     </div>
   );
 
-  const generateImage = async (cutIndex: number) => {
+  const generateImage = async (cutIndex: number, options?: { force?: boolean }) => {
     if (!keys.g1) return alert('Gemini 키가 필요합니다.');
-    
-    const promptObj = ui.cuts.prompts.find(p => p.index === cutIndex);
+    const latest = latestUiRef.current;
+    const existing = latest?.imageJobs?.find((j: any) => j.cut === cutIndex);
+    if (!options?.force && existing?.imageUrl) {
+      return;
+    }
+
+    const promptObj = (latest?.cuts?.prompts || []).find((p: any) => p.index === cutIndex);
     if (!promptObj) return;
 
     setUi(prev => ({
@@ -4547,12 +4802,12 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
 
     try {
       const ai = new GoogleGenAI({ apiKey: keys.g1 });
-      const stylePrompt = resolveSelectedVideoStyle(ui.videoStyle.selected)?.prompt || '';
+      const stylePrompt = resolveSelectedVideoStyle(latest?.videoStyle?.selected || ui.videoStyle.selected)?.prompt || '';
       
       const res = await generateContentWithFallback(ai, {
         model: 'gemini-3.1-flash-image-preview',
         contents: { parts: [{ text: `${promptObj.prompt}. Style: ${stylePrompt}` }] },
-        config: { imageConfig: { aspectRatio: ui.cuts.ratio as any } }
+        config: { imageConfig: { aspectRatio: (latest?.cuts?.ratio || ui.cuts.ratio) as any } }
       });
 
       console.log(`Image Generation Response for Cut ${cutIndex}:`, res);
@@ -4576,8 +4831,8 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
           imageJobs: prev.imageJobs.map(j => j.cut === cutIndex
             ? {
                 ...j,
-                status: ui.productPromo.imageUrl ? '원본 대체' : '이미지 없음 (재시도)',
-                imageUrl: ui.productPromo.imageUrl || j.imageUrl,
+                status: latest?.productPromo?.imageUrl ? '원본 대체' : '이미지 없음 (재시도)',
+                imageUrl: latest?.productPromo?.imageUrl || j.imageUrl,
               }
             : j)
         }));
@@ -4589,8 +4844,8 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
         imageJobs: prev.imageJobs.map(j => j.cut === cutIndex
           ? {
               ...j,
-              status: ui.productPromo.imageUrl ? '원본 대체(실패복구)' : '실패',
-              imageUrl: ui.productPromo.imageUrl || j.imageUrl,
+              status: latest?.productPromo?.imageUrl ? '원본 대체(실패복구)' : '실패',
+              imageUrl: latest?.productPromo?.imageUrl || j.imageUrl,
             }
           : j)
       }));
@@ -4619,11 +4874,41 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
     const sortedVideoJobs = ui.videoJobs
       .filter((j: any) => j.videoUrl)
       .sort((a: any, b: any) => a.cut - b.cut);
-    const hookVideoCuts = new Set(
-      ui.finalVideo.useHybridHookVideos
-        ? sortedVideoJobs.slice(0, Math.max(0, Number(ui.finalVideo.hookVideoCount || 7))).map((j: any) => j.cut)
-        : [],
-    );
+    const videoCutIds = sortedVideoJobs.map((j: any) => j.cut);
+    const desiredHookCount = ui.finalVideo.useHybridHookVideos
+      ? Math.max(0, Number(ui.finalVideo.hookVideoCount || 0))
+      : 0;
+    const resolvedHookCount = Math.min(desiredHookCount, videoCutIds.length);
+    const hookVideoCuts = new Set(videoCutIds.slice(0, resolvedHookCount));
+
+    const cutTexts = ui.cuts.items || [];
+    const totalDuration = Number(ui.tts.measuredDuration || 0) > 0
+      ? Number(ui.tts.measuredDuration || 0)
+      : Math.max(Number(scriptMetrics.sec1x || 0), cutTexts.length * Math.max(1, Number(ui.finalVideo.slideDuration || 3)));
+    const safeTotalDuration = Math.max(1, totalDuration);
+    const buildDurationsByCut = () => {
+      const count = Math.max(1, cutTexts.length);
+      const minPerCut = 0.6;
+      if (safeTotalDuration < minPerCut * count) {
+        const even = Math.max(0.2, safeTotalDuration / count);
+        return cutTexts.reduce<Record<number, number>>((acc, _, idx) => {
+          acc[idx + 1] = even;
+          return acc;
+        }, {});
+      }
+      const weights = cutTexts.map(text => Math.max(1, normalizeSubtitleText(text).replace(/\s/g, '').length));
+      const totalWeight = weights.reduce((sum, w) => sum + w, 0) || 1;
+      const durations = weights.map(w => (safeTotalDuration * w) / totalWeight);
+      const sumWithoutLast = durations.slice(0, -1).reduce((sum, v) => sum + v, 0);
+      if (durations.length > 0) {
+        durations[durations.length - 1] = Math.max(0.2, safeTotalDuration - sumWithoutLast);
+      }
+      return durations.reduce<Record<number, number>>((acc, duration, idx) => {
+        acc[idx + 1] = duration;
+        return acc;
+      }, {});
+    };
+    const durationByCut = buildDurationsByCut();
     const availableSlides = ui.imageJobs
       .filter(j => j.imageUrl)
       .sort((a, b) => a.cut - b.cut)
@@ -4635,6 +4920,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
           videoUrl: mediaType === 'video' ? sortedVideoJobs.find((v: any) => v.cut === j.cut)?.videoUrl || '' : '',
           videoDurationSec: mediaType === 'video' ? Number(sortedVideoJobs.find((v: any) => v.cut === j.cut)?.durationSec || 0) : 0,
           mediaType,
+          duration: durationByCut[j.cut] || Math.max(0.2, Number(ui.finalVideo.slideDuration || 3)),
           motion: previousMotionByCut.get(j.cut) || pickSlideMotion(ui.cuts.items[j.cut - 1] || '', j.cut),
         };
       });
@@ -4655,6 +4941,8 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
         activeSlide: 0,
         url: '',
         outputFormat: 'webm',
+        hookVideoCount: resolvedHookCount,
+        useHybridHookVideos: resolvedHookCount > 0,
       },
     }));
     const hookVideoCount = availableSlides.filter((s: any) => s.mediaType === 'video' && s.videoUrl).length;
@@ -4784,6 +5072,9 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
 
       const fallbackSlideDuration = Math.max(1, Number(ui.finalVideo.slideDuration || 3));
       const slideDurations = slides.map((slide: any) => {
+        if (Number(slide?.duration || 0) > 0) {
+          return Math.max(0.2, Number(slide.duration));
+        }
         if (slide?.mediaType === 'video' && Number(slide?.videoDurationSec || 0) > 0) {
           return Math.max(0.2, Number(slide.videoDurationSec));
         }
@@ -5770,7 +6061,7 @@ ${JSON.stringify(cutPayload)}`,
             {ui.productPromo.running ? '자동 제작 중...' : '상품홍보 원클릭 실행'}
           </button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
           <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
             <p className="text-[10px] font-black text-fuchsia-200 uppercase tracking-widest">출력 방식</p>
             <div className="grid grid-cols-2 gap-2">
@@ -5819,6 +6110,29 @@ ${JSON.stringify(cutPayload)}`,
               className="w-full accent-fuchsia-400 disabled:opacity-40"
             />
             <p className="text-[10px] text-slate-500">권장: 2개 영상 + 3개 이미지(총 5컷)</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+            <p className="text-[10px] font-black text-fuchsia-200 uppercase tracking-widest">배경음악</p>
+            <select
+              value={ui.finalVideo.bgmTrack || ''}
+              onChange={(e) => setUi(prev => ({
+                ...prev,
+                finalVideo: {
+                  ...prev.finalVideo,
+                  bgmEnabled: Boolean(e.target.value),
+                  bgmTrack: e.target.value,
+                  bgmTrackUserSelected: true,
+                  sfxEnabled: false,
+                },
+              }))}
+              className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none"
+            >
+              <option value="">없음</option>
+              {BGM_LIBRARY.map(track => (
+                <option key={track.path} value={track.path}>{track.label}</option>
+              ))}
+            </select>
+            <p className="text-[10px] text-slate-500">여기서 선택한 음원이 자동 제작/렌더에 그대로 연동됩니다.</p>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
@@ -5955,25 +6269,28 @@ ${JSON.stringify(cutPayload)}`,
         </div>
       </section>
 
-      {isAutoRunning && (
+      {(isAutoRunning || isManualRunning) && (
         <>
-          <div className="fixed inset-0 bg-slate-950/40 animate-pulse pointer-events-none z-30" />
+          {isAutoRunning && <div className="fixed inset-0 bg-slate-950/40 animate-pulse pointer-events-none z-30" />}
           <div className="sticky top-3 z-40 px-3">
             <div className="max-w-5xl mx-auto bg-slate-950/80 border border-cyan-400/20 rounded-2xl p-3 shadow-lg shadow-cyan-500/10 backdrop-blur-xl">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-[10px] font-black text-cyan-300 uppercase tracking-widest">자동 진행 중</p>
-                  <p className="text-xs text-slate-200 font-bold truncate">{currentAutoTitle || '자동화 진행'}</p>
+                  <p className="text-[10px] font-black text-cyan-300 uppercase tracking-widest">{isAutoRunning ? '자동 진행 중' : '수동 작업 진행 중'}</p>
+                  <p className="text-xs text-slate-200 font-bold truncate">{isAutoRunning ? (currentAutoTitle || '자동화 진행') : '현재 패널 작업'}</p>
                 </div>
                 <div className="text-[11px] text-slate-300">
-                  현재 단계: <span className="text-cyan-300 font-bold">{currentAutoStep || '준비 중'}</span>
+                  현재 단계: <span className="text-cyan-300 font-bold">{isAutoRunning ? (currentAutoStep || '준비 중') : (currentManualStep || '진행 중')}</span>
                 </div>
               </div>
               <div className="mt-2 h-2 bg-white/10 rounded-full overflow-hidden">
-                <div className="h-full bg-cyan-400 transition-all" style={{ width: `${Math.round(autoProgress * 100)}%` }} />
+                <div className="h-full bg-cyan-400 transition-all" style={{ width: `${Math.round((isAutoRunning ? autoProgress : 0.5) * 100)}%` }} />
               </div>
               <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] text-slate-300">
-                {(ui.autoFlow.log?.length ? ui.autoFlow.log : [{ at: '', message: '최근 로그 없음' }]).slice(-4).map((log, idx) => (
+                {(isAutoRunning
+                  ? (ui.autoFlow.log?.length ? ui.autoFlow.log : [{ at: '', message: '최근 로그 없음' }])
+                  : [{ at: '', message: currentManualStep || '수동 작업 중' }]
+                ).slice(-4).map((log, idx) => (
                   <div key={`${log.at}-${idx}`} className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5">
                     <p className="text-slate-200 font-bold">{log.message}</p>
                     {log.at && <p className="text-[9px] text-slate-500 mt-0.5">{new Date(log.at).toLocaleTimeString()}</p>}
@@ -5983,6 +6300,26 @@ ${JSON.stringify(cutPayload)}`,
             </div>
           </div>
         </>
+      )}
+
+      {Boolean(imagePreviewUrl) && (
+        <div
+          className="fixed inset-0 z-[130] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setImagePreviewUrl('')}
+        >
+          <img
+            src={imagePreviewUrl}
+            alt="preview"
+            className="max-w-[95vw] max-h-[90vh] object-contain rounded-2xl border border-white/20"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            onClick={() => setImagePreviewUrl('')}
+            className="absolute top-4 right-4 px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs font-black"
+          >
+            닫기
+          </button>
+        </div>
       )}
 
       <main className="max-w-5xl mx-auto space-y-8">
@@ -6333,6 +6670,18 @@ ${JSON.stringify(cutPayload)}`,
                         <option value="1:1">1:1</option>
                         <option value="3:4">3:4</option>
                       </select>
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-[10px] font-black text-cyan-100 uppercase tracking-widest">주제 상황설명 (원클릭 고정)</label>
+                      <input
+                        value={ui.autoFlow.fixed.subjectContext}
+                        onChange={(e) => setUi(prev => ({
+                          ...prev,
+                          autoFlow: { ...prev.autoFlow, fixed: { ...prev.autoFlow.fixed, subjectContext: e.target.value } },
+                        }))}
+                        placeholder="예: 등장인물은 AI 미녀 진행자, 친근한 설명 톤"
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      />
                     </div>
                     <div className="space-y-2">
                       <label className="text-[10px] font-black text-cyan-100 uppercase tracking-widest">영상 스타일</label>
@@ -7249,11 +7598,17 @@ ${JSON.stringify(cutPayload)}`,
                       <div key={idx} className="bg-black/40 border border-white/5 rounded-3xl overflow-hidden group relative">
                         <div className="aspect-video bg-white/5 relative">
                           {job?.imageUrl ? (
-                            <img src={job.imageUrl} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" />
+                            <img
+                              src={job.imageUrl}
+                              className="w-full h-full object-cover cursor-zoom-in"
+                              alt=""
+                              referrerPolicy="no-referrer"
+                              onClick={() => setImagePreviewUrl(job.imageUrl || '')}
+                            />
                           ) : (
                             <div className="absolute inset-0 flex items-center justify-center">
                               <button 
-                                onClick={() => generateImage(cut.index)}
+                                onClick={() => generateImage(cut.index, { force: true })}
                                 disabled={job?.status === '생성 중...'}
                                 className="p-4 bg-white/5 hover:bg-white/10 rounded-full transition-all"
                               >
@@ -7269,7 +7624,7 @@ ${JSON.stringify(cutPayload)}`,
                           {/* Action Buttons Overlay */}
                           <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                             <button 
-                              onClick={() => generateImage(cut.index)}
+                              onClick={() => generateImage(cut.index, { force: true })}
                               className="p-2 bg-cyan-500 text-black rounded-lg hover:bg-cyan-400 transition-all"
                               title="다시 생성"
                             >
