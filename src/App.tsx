@@ -6939,7 +6939,7 @@ ${JSON.stringify(cutPayload)}`,
           <PanelHeader title="14. 자동 발행 (YouTube 우선)" id="p14" colorClass="text-red-400" />
           {ui.panelsOpen.p14 && (
             <div className="space-y-6">
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2">
                 {publishSteps.map(step => {
                   const active = ui.publishing.mobileStep === step.id;
                   const completed = ui.publishing.mobileStep > step.id;
@@ -6970,7 +6970,7 @@ ${JSON.stringify(cutPayload)}`,
                           </div>
                         ))}
                       </div>
-                      <div className="rounded-xl border border-white/10 bg-slate-900/60 p-3 flex items-center justify-between gap-3">
+                      <div className="rounded-xl border border-white/10 bg-slate-900/60 p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                           <p className="text-xs font-black text-white">{ui.publishing.accounts[0]?.name || 'YouTube 기본 채널'}</p>
                           <p className="text-[10px] text-slate-400">{ui.publishing.accounts[0]?.handle || '@your-channel'}</p>
@@ -6979,17 +6979,17 @@ ${JSON.stringify(cutPayload)}`,
                             <p className="text-[10px] text-emerald-200/80 mt-1">동기화: {new Date(ui.publishing.accounts[0].lastSyncedAt).toLocaleString()}</p>
                           )}
                         </div>
-                        <div className="flex flex-col gap-2">
+                        <div className="flex flex-col gap-2 w-full sm:w-auto">
                           <button
                             onClick={() => connectYouTubeAccount('login')}
-                            className={`px-3 py-2 rounded-lg text-xs font-black transition-all ${ui.publishing.accounts[0]?.connected ? 'bg-emerald-400 text-black' : 'bg-red-500 text-white hover:bg-red-400'}`}
+                            className={`w-full sm:w-auto px-3 py-2 rounded-lg text-xs font-black transition-all ${ui.publishing.accounts[0]?.connected ? 'bg-emerald-400 text-black' : 'bg-red-500 text-white hover:bg-red-400'}`}
                           >
                             {hasValidYouTubeAuth ? 'Google 로그인됨' : 'Google 로그인'}
                           </button>
                           {isApprovedUser && hasValidYouTubeAuth && !ui.publishing.accounts[0]?.connected && (
                             <button
                               onClick={() => connectYouTubeAccount('youtube')}
-                              className="px-3 py-2 rounded-lg text-xs font-black transition-all bg-emerald-500 text-black hover:bg-emerald-400"
+                              className="w-full sm:w-auto px-3 py-2 rounded-lg text-xs font-black transition-all bg-emerald-500 text-black hover:bg-emerald-400"
                             >
                               YouTube 권한 연결
                             </button>
@@ -6997,7 +6997,7 @@ ${JSON.stringify(cutPayload)}`,
                           {ui.publishing.accounts[0]?.connected && (
                             <button
                               onClick={disconnectYouTubeAccount}
-                              className="px-3 py-2 rounded-lg text-xs font-black transition-all bg-white/10 text-slate-100 hover:bg-white/20"
+                              className="w-full sm:w-auto px-3 py-2 rounded-lg text-xs font-black transition-all bg-white/10 text-slate-100 hover:bg-white/20"
                             >
                               연결 해제
                             </button>
@@ -7006,7 +7006,7 @@ ${JSON.stringify(cutPayload)}`,
                       </div>
 
                       <div className="rounded-xl border border-amber-300/20 bg-amber-500/10 p-3 space-y-3">
-                        <div className="flex items-center justify-between gap-3">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                           <p className="text-[11px] font-black text-amber-100">권한 상태</p>
                           <span className={`text-[10px] px-2 py-0.5 rounded-full border ${isPublishAdmin ? 'bg-emerald-500/20 border-emerald-300/30 text-emerald-100' : isApprovedUser ? 'bg-cyan-500/20 border-cyan-300/30 text-cyan-100' : 'bg-rose-500/20 border-rose-300/30 text-rose-100'}`}>
                             {isPublishAdmin ? 'ADMIN' : isApprovedUser ? 'APPROVED' : 'VIEWER'}
@@ -7045,14 +7045,14 @@ ${JSON.stringify(cutPayload)}`,
                         )}
                         {isPublishAdmin && (
                           <>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                               <input
                                 value={ui.publishing.pendingAdminEmail}
                                 onChange={(e) => setUi(prev => ({ ...prev, publishing: { ...prev.publishing, pendingAdminEmail: e.target.value } }))}
                                 placeholder="관리자 이메일 추가"
-                                className="flex-1 bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px] outline-none"
+                                className="w-full sm:flex-1 bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px] outline-none"
                               />
-                              <button onClick={addAdminEmail} className="px-3 py-2 rounded-lg bg-emerald-400 text-black text-[11px] font-black">추가</button>
+                              <button onClick={addAdminEmail} className="w-full sm:w-auto px-3 py-2 rounded-lg bg-emerald-400 text-black text-[11px] font-black">추가</button>
                             </div>
                             <div className="flex flex-wrap gap-1.5">
                               {effectiveAdminEmails.map(email => (
@@ -7068,14 +7068,14 @@ ${JSON.stringify(cutPayload)}`,
                             </div>
                             <div className="border-t border-white/10 pt-3 space-y-2">
                               <p className="text-[11px] font-black text-cyan-100">승인 사용자 관리 (다운로드/연동/발행)</p>
-                              <div className="flex items-center gap-2">
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                                 <input
                                   value={ui.publishing.pendingApprovedEmail}
                                   onChange={(e) => setUi(prev => ({ ...prev, publishing: { ...prev.publishing, pendingApprovedEmail: e.target.value } }))}
                                   placeholder="승인 사용자 이메일 추가"
-                                  className="flex-1 bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px] outline-none"
+                                  className="w-full sm:flex-1 bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px] outline-none"
                                 />
-                                <button onClick={addApprovedEmail} className="px-3 py-2 rounded-lg bg-cyan-400 text-black text-[11px] font-black">추가</button>
+                                <button onClick={addApprovedEmail} className="w-full sm:w-auto px-3 py-2 rounded-lg bg-cyan-400 text-black text-[11px] font-black">추가</button>
                               </div>
                               <div className="flex flex-wrap gap-1.5">
                                 {effectiveApprovedEmails.map(email => (
