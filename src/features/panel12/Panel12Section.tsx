@@ -154,7 +154,7 @@ export default function Panel12Section(props: Props) {
   const previewAudioRef = React.useRef<HTMLAudioElement | null>(null);
   const [previewAudioPath, setPreviewAudioPath] = React.useState('');
   const [previewAudioType, setPreviewAudioType] = React.useState<'' | 'bgm' | 'sfx'>('');
-  const [previewGuides, setPreviewGuides] = React.useState({ shorts: true, reels: false, tiktok: false });
+  const [previewGuideMode, setPreviewGuideMode] = React.useState<'shorts' | 'reels' | 'tiktok'>('shorts');
   const previewTemplate = BUILTIN_SUBTITLE_TEMPLATES.find(t => t.id === previewTemplateId) || BUILTIN_SUBTITLE_TEMPLATES[0];
   const maxHookVideoCount = Math.max(1, ui.cuts.items?.length || 1);
 
@@ -469,71 +469,13 @@ export default function Panel12Section(props: Props) {
                   <div className="flex items-center justify-between gap-3 pt-1">
                     <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">전환 효과음(SFX)</label>
                     <button
-                      onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxEnabled: !prev.finalVideo.sfxEnabled } }))}
-                      className={`px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.sfxEnabled ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
+                      disabled
+                      className="px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all bg-black/30 text-slate-500 border-white/10 cursor-not-allowed"
                     >
-                      {ui.finalVideo.sfxEnabled ? 'ON' : 'OFF'}
+                      영상편집에서 설정
                     </button>
                   </div>
-                  {ui.finalVideo.sfxEnabled && (
-                    <>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxMode: 'auto' } }))}
-                          className={`py-2 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.sfxMode === 'auto' ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
-                        >
-                          자동 추천
-                        </button>
-                        <button
-                          onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxMode: 'single' } }))}
-                          className={`py-2 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.sfxMode === 'single' ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
-                        >
-                          수동 고정
-                        </button>
-                      </div>
-                      <select
-                        value={ui.finalVideo.sfxTrack}
-                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxTrack: e.target.value } }))}
-                        className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
-                      >
-                        {SFX_LIBRARY.map(track => (
-                          <option key={track.path} value={track.path}>{track.label}</option>
-                        ))}
-                      </select>
-                      <button
-                        onClick={() => playPreviewAudio(ui.finalVideo.sfxTrack, 'sfx')}
-                        className={`w-full rounded-lg border px-3 py-2 text-[10px] font-black transition-all flex items-center justify-center gap-1 ${previewAudioType === 'sfx' && previewAudioPath === ui.finalVideo.sfxTrack ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/5 text-slate-200 border-white/15 hover:bg-white/10'}`}
-                      >
-                        <Play className="w-3 h-3" /> {previewAudioType === 'sfx' && previewAudioPath === ui.finalVideo.sfxTrack ? '효과음 미리듣기 중지' : '효과음 미리듣기'}
-                      </button>
-                      {ui.finalVideo.sfxMode === 'auto' && (
-                        <p className="text-[10px] text-emerald-100/90 bg-emerald-500/10 border border-emerald-300/20 rounded-lg px-3 py-2">
-                          자동 추천 모드에서는 컷별 키워드 분석으로 효과음을 선택합니다. 위 드롭다운은 미리듣기/기본 대체용으로 사용됩니다.
-                        </p>
-                      )}
-                      <div className="flex items-center justify-between gap-3">
-                        <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">SFX 볼륨</label>
-                        <span className="text-[10px] text-emerald-100 font-bold">{ui.finalVideo.sfxVolume}%</span>
-                      </div>
-                      <InlineSmoothRange
-                        min={0}
-                        max={100}
-                        step={1}
-                        value={Number(ui.finalVideo.sfxVolume || 0)}
-                        onChange={(v) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxVolume: Number(v) } }))}
-                        className="w-full accent-emerald-300"
-                      />
-                      <div className="flex items-center justify-between gap-3">
-                        <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">컷 전환마다 삽입</label>
-                        <button
-                          onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxEveryCut: !prev.finalVideo.sfxEveryCut } }))}
-                          className={`px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.sfxEveryCut ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
-                        >
-                          {ui.finalVideo.sfxEveryCut ? 'ON' : '1회'}
-                        </button>
-                      </div>
-                    </>
-                  )}
+                  <p className="text-[10px] text-slate-400">효과음은 자동 오류를 줄이기 위해 12번에서 비활성화했습니다. 13번 영상편집(준비중)에서 최종 수동 적용하도록 이동됩니다.</p>
                   <div className="flex items-center justify-between gap-3 pt-1">
                     <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">자막</label>
                     <button
@@ -1041,11 +983,11 @@ export default function Panel12Section(props: Props) {
                   { key: 'reels', label: 'Instagram Reels' },
                   { key: 'tiktok', label: 'TikTok' },
                 ].map(item => {
-                  const active = (previewGuides as any)[item.key];
+                  const active = previewGuideMode === item.key;
                   return (
                     <button
                       key={item.key}
-                      onClick={() => setPreviewGuides(prev => ({ ...prev, [item.key]: !active }))}
+                      onClick={() => setPreviewGuideMode(item.key as any)}
                       className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-black transition-all ${active ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-white/5 text-slate-300 border-white/10'}`}
                     >
                       {item.label} {active ? 'ON' : 'OFF'}
@@ -1054,7 +996,7 @@ export default function Panel12Section(props: Props) {
                 })}
               </div>
               {ui.finalVideo.url ? (
-                <div className="w-full bg-black rounded-2xl overflow-hidden relative border border-white/10" style={{ aspectRatio: ratioToCss(ui.cuts.ratio || '16:9') }}>
+                <div className="w-full max-w-[360px] mx-auto bg-black rounded-2xl overflow-hidden relative border border-white/10" style={{ aspectRatio: '9 / 16' }}>
                   {ui.finalVideo.url.startsWith('data:image') ? (
                     <div className="w-full h-full flex items-center justify-center bg-slate-900">
                       <img src={ui.finalVideo.url} className="w-full h-full object-contain opacity-50" alt="" />
@@ -1069,7 +1011,7 @@ export default function Panel12Section(props: Props) {
                 </div>
               ) : ui.finalVideo.type === 'image_slide' && ui.finalVideo.slides.length > 0 ? (
                 <div className="w-full space-y-3">
-                  <div className="w-full bg-black rounded-2xl overflow-hidden relative border border-white/10" style={{ aspectRatio: ratioToCss(ui.cuts.ratio || '16:9') }}>
+                  <div className="w-full max-w-[360px] mx-auto bg-black rounded-2xl overflow-hidden relative border border-white/10" style={{ aspectRatio: '9 / 16' }}>
                     <AnimatePresence mode="wait">
                       {(() => {
                         const active = ui.finalVideo.slides[ui.finalVideo.activeSlide];
@@ -1116,17 +1058,43 @@ export default function Panel12Section(props: Props) {
                         </p>
                       </div>
                     )}
-                    {(previewGuides.shorts || previewGuides.reels || previewGuides.tiktok) && (
-                      <>
-                        <div className="absolute top-0 left-0 right-0 h-[11%] bg-black/25 pointer-events-none" />
-                        <div className="absolute bottom-0 left-0 right-0 h-[12%] bg-black/25 pointer-events-none" />
-                        <div className="absolute top-2 left-2 flex flex-col gap-1 pointer-events-none">
-                          {previewGuides.shorts && <span className="text-[9px] px-2 py-0.5 rounded bg-red-500/75 text-white font-black">Shorts UI</span>}
-                          {previewGuides.reels && <span className="text-[9px] px-2 py-0.5 rounded bg-pink-500/75 text-white font-black">Reels UI</span>}
-                          {previewGuides.tiktok && <span className="text-[9px] px-2 py-0.5 rounded bg-cyan-500/75 text-black font-black">TikTok UI</span>}
-                        </div>
-                      </>
-                    )}
+                    <div className="absolute inset-0 pointer-events-none">
+                      <div className="absolute top-0 left-0 right-0 h-[11%] bg-black/18" />
+                      <div className="absolute bottom-0 left-0 right-0 h-[15%] bg-black/18" />
+                      {previewGuideMode === 'shorts' && (
+                        <>
+                          <div className="absolute right-[4%] top-[27%] text-white/80 text-[11px] font-black leading-6 text-right">
+                            <p>👍 2.8M</p>
+                            <p>👎 2.8M</p>
+                            <p>💬 2.8M</p>
+                            <p>↗ 2.8M</p>
+                          </div>
+                          <p className="absolute left-[6%] bottom-[7%] text-white/75 text-[11px] font-black">@Your name</p>
+                        </>
+                      )}
+                      {previewGuideMode === 'reels' && (
+                        <>
+                          <div className="absolute right-[4%] top-[33%] text-white/80 text-[11px] font-black leading-7 text-right">
+                            <p>♡ 2.8M</p>
+                            <p>◌ 2.8M</p>
+                            <p>✈ 2.8M</p>
+                          </div>
+                          <p className="absolute left-[6%] bottom-[8%] text-white/75 text-[11px] font-black">@Your name</p>
+                        </>
+                      )}
+                      {previewGuideMode === 'tiktok' && (
+                        <>
+                          <div className="absolute top-[5%] left-0 right-0 text-center text-white/75 text-[10px] font-black">Explore   Following   For You</div>
+                          <div className="absolute right-[4%] top-[36%] text-white/80 text-[11px] font-black leading-7 text-right">
+                            <p>👤</p>
+                            <p>♥ 2.8M</p>
+                            <p>💬 2.8M</p>
+                            <p>🔖 2.8M</p>
+                          </div>
+                          <p className="absolute left-[6%] bottom-[8%] text-white/75 text-[11px] font-black">Your name</p>
+                        </>
+                      )}
+                    </div>
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-[10px]">
                     <div className="bg-white/5 border border-white/10 rounded-lg py-2">총 컷 {ui.finalVideo.slides.length}</div>

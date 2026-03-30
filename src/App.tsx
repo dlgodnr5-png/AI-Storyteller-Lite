@@ -1706,6 +1706,7 @@ export default function App() {
     productPromo: {
       imageUrl: '',
       sourceImageUrl: '',
+      referenceImages: [] as string[],
       productUrl: '',
       productComment: '',
       visualAnchor: '',
@@ -3101,10 +3102,14 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       : prompts;
 
     if (latestUiRef.current?.productPromo?.strictProductLock && latestUiRef.current?.productPromo?.imageUrl) {
-      const lockedImage = String(latestUiRef.current.productPromo.imageUrl);
+      const references = (latestUiRef.current?.productPromo?.referenceImages || []).filter(Boolean);
+      const fallbackImage = String(latestUiRef.current.productPromo.imageUrl);
       setUi(prev => {
         const nextJobs = [...(prev.imageJobs || [])];
         for (const cut of queue) {
+          const lockedImage = references.length > 0
+            ? String(references[(Math.max(1, cut.index) - 1) % references.length])
+            : fallbackImage;
           const idx = nextJobs.findIndex((j: any) => j.cut === cut.index);
           if (idx < 0) {
             nextJobs.push({ cut: cut.index, status: '원본 고정', imageUrl: lockedImage });
@@ -3680,13 +3685,33 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
     return `data:${file.type || 'image/jpeg'};base64,${btoa(binary)}`;
   };
 
+  const blobToDataUrl = async (blob: Blob) => {
+    const buffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return `data:${blob.type || 'image/jpeg'};base64,${btoa(binary)}`;
+  };
+
   const handleProductPromoImage = async (file?: File | null) => {
     if (!file) return;
     const dataUrl = await fileToDataUrl(file);
-    setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, imageUrl: dataUrl, sourceImageUrl: '' } }));
+    setUi(prev => ({
+      ...prev,
+      productPromo: {
+        ...prev.productPromo,
+        imageUrl: dataUrl,
+        sourceImageUrl: '',
+        referenceImages: [...(prev.productPromo.referenceImages || []), dataUrl].slice(-20),
+      },
+    }));
   };
 
-  const applyProductSourceImageUrl = () => {
+  const applyProductSourceImageUrl = async () => {
     const raw = String(latestUiRef.current?.productPromo?.sourceImageUrl || '').trim();
     if (!raw) {
       alert('상품 이미지 URL을 입력해 주세요.');
@@ -3696,13 +3721,31 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       alert('http(s) 이미지 URL만 사용할 수 있습니다.');
       return;
     }
-    setUi(prev => ({
-      ...prev,
-      productPromo: {
-        ...prev.productPromo,
-        imageUrl: raw,
-      },
-    }));
+    try {
+      const response = await fetch(raw, { mode: 'cors' });
+      if (!response.ok) throw new Error('fetch-failed');
+      const blob = await response.blob();
+      const dataUrl = await blobToDataUrl(blob);
+      setUi(prev => ({
+        ...prev,
+        productPromo: {
+          ...prev.productPromo,
+          imageUrl: dataUrl,
+          referenceImages: [...(prev.productPromo.referenceImages || []), dataUrl].slice(-20),
+        },
+      }));
+      return;
+    } catch {
+      setUi(prev => ({
+        ...prev,
+        productPromo: {
+          ...prev.productPromo,
+          imageUrl: raw,
+          referenceImages: [...(prev.productPromo.referenceImages || []), raw].slice(-20),
+        },
+      }));
+      alert('원본 URL 이미지를 직접 다운로드할 수 없어 URL 링크로 참조합니다. 가능하면 파일 업로드를 권장합니다.');
+    }
   };
 
   const runProductPromoOneClick = async () => {
@@ -4861,7 +4904,10 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
     if (!keys.g1) return alert('Gemini 키가 필요합니다.');
     const latest = latestUiRef.current;
     if (latest?.productPromo?.strictProductLock && latest?.productPromo?.imageUrl) {
-      const lockedImage = String(latest.productPromo.imageUrl);
+      const references = (latest?.productPromo?.referenceImages || []).filter(Boolean);
+      const lockedImage = references.length > 0
+        ? String(references[(Math.max(1, cutIndex) - 1) % references.length])
+        : String(latest.productPromo.imageUrl);
       setUi(prev => ({
         ...prev,
         imageJobs: prev.imageJobs.some(j => j.cut === cutIndex)
@@ -6350,23 +6396,54 @@ ${JSON.stringify(cutPayload)}`,
             </button>
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-4">
-          <label className="rounded-2xl border border-dashed border-fuchsia-300/40 bg-fuchsia-500/5 p-3 cursor-pointer hover:bg-fuchsia-500/10 transition-all min-h-[160px] flex items-center justify-center">
-            {ui.productPromo.imageUrl ? (
-              <img src={ui.productPromo.imageUrl} alt="product" className="w-full h-full max-h-[160px] object-cover rounded-xl" />
-            ) : (
-              <span className="text-[11px] text-fuchsia-100/80 font-bold">상품 사진 업로드</span>
-            )}
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={async (e) => {
-                await handleProductPromoImage(e.target.files?.[0] || null);
-                e.currentTarget.value = '';
-              }}
-            />
-          </label>
+        <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4">
+          <div className="space-y-3">
+            <label className="rounded-2xl border border-dashed border-fuchsia-300/40 bg-fuchsia-500/5 p-3 cursor-pointer hover:bg-fuchsia-500/10 transition-all min-h-[160px] flex items-center justify-center">
+              {ui.productPromo.imageUrl ? (
+                <img src={ui.productPromo.imageUrl} alt="product" className="w-full h-full max-h-[160px] object-cover rounded-xl" />
+              ) : (
+                <span className="text-[11px] text-fuchsia-100/80 font-bold">상품 사진 업로드</span>
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={async (e) => {
+                  await handleProductPromoImage(e.target.files?.[0] || null);
+                  e.currentTarget.value = '';
+                }}
+              />
+            </label>
+            <label className="w-full block text-center rounded-lg bg-white/10 border border-white/15 px-3 py-2 text-[11px] font-black cursor-pointer hover:bg-white/20">
+              상품 이미지 추가 업로드
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={async (e) => {
+                  const files = Array.from(e.target.files || []);
+                  for (const file of files) {
+                    await handleProductPromoImage(file);
+                  }
+                  e.currentTarget.value = '';
+                }}
+              />
+            </label>
+            <div className="grid grid-cols-4 gap-1.5 max-h-24 overflow-y-auto custom-scrollbar">
+              {(ui.productPromo.referenceImages || []).map((img: string, idx: number) => (
+                <button
+                  key={`${img.slice(0, 32)}-${idx}`}
+                  onClick={() => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, imageUrl: img } }))}
+                  className={`rounded-md overflow-hidden border ${ui.productPromo.imageUrl === img ? 'border-fuchsia-300' : 'border-white/10'}`}
+                  title={`참조 이미지 ${idx + 1}`}
+                >
+                  <img src={img} alt={`ref-${idx + 1}`} className="w-full h-12 object-cover" />
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-500">이미지 개수 제한 없이 추가 가능하며, 자동 제작 시 컷 순서에 맞춰 순환 반영됩니다.</p>
+          </div>
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-2">
             <p className="text-[11px] text-slate-300">목표 길이: <span className="font-black text-white">20초 이하</span></p>
             <p className="text-[11px] text-slate-300">진행 단계: <span className="font-black text-emerald-300">{ui.productPromo.step || '대기'}</span></p>
