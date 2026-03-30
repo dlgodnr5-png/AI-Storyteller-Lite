@@ -1482,7 +1482,7 @@ export default function App() {
   const [ui, setUi] = useState({
     settingsOpen: false,
     happyDayOpen: false,
-    panelsOpen: { p1: true, p2: true, p3: true, p4: true, p_style: true, p5: true, p6: true, p7: true, p8: true, p9: true, p10: true, p11: true, p12: true, p13: true, p14: true },
+    panelsOpen: { p1: true, p2: true, p3: true, p4: true, p_style: true, p5: true, p6: true, p7: true, p8: true, p9: true, p10: true, p11: true, p12: true, p13: true, p14: true, p15: true },
     searching: false,
     searchError: '',
     videoStyle: {
@@ -7333,6 +7333,28 @@ ${JSON.stringify(cutPayload)}`,
                   <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-[10px] text-slate-400 leading-relaxed">
                     이동 중(지하철/버스) 사용을 위해 모바일 단계형 UI로 구성되었습니다. 작성 내용과 예약 상태는 자동 저장됩니다.
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-4 md:p-8 backdrop-blur-xl">
+          <PanelHeader title="15. SNS 달력" id="p15" colorClass="text-fuchsia-400" />
+          {ui.panelsOpen.p15 && (
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-fuchsia-300/20 bg-fuchsia-500/10 px-4 py-3">
+                <p className="text-[11px] font-black text-fuchsia-100 uppercase tracking-widest">SNS 발행 캘린더 (준비 중)</p>
+                <p className="text-[11px] text-fuchsia-100/80 mt-1">자동 발행 예약과 연결된 일정표를 이 패널에서 관리합니다. (YouTube 외 SNS 포함)</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+                  <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">예약 예정</p>
+                  <p className="text-xs text-slate-500 mt-2">아직 등록된 예약이 없습니다.</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+                  <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">SNS 채널 상태</p>
+                  <p className="text-xs text-slate-500 mt-2">연결된 채널 정보를 이곳에서 확인합니다.</p>
                 </div>
               </div>
             </div>
