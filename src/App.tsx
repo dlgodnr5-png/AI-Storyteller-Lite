@@ -6507,13 +6507,13 @@ ${JSON.stringify(cutPayload)}`,
             <div className="space-y-6">
               <p className="text-xs text-slate-400">대본을 의미/단락 기준으로 컷 분할 후 프롬프트 생성</p>
               
-              <div className="flex flex-wrap gap-4 items-end">
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
                 <div className="space-y-2">
                   <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">영상 스타일</label>
                   <select 
                     value={ui.videoStyle.selected}
                     onChange={(e) => setUi(prev => ({ ...prev, videoStyle: { ...prev.videoStyle, selected: e.target.value } }))}
-                    className="bg-slate-800 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer min-w-[150px]"
+                    className="w-full sm:w-auto bg-slate-800 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer sm:min-w-[150px]"
                   >
                     {VIDEO_STYLES_31.map(s => (
                       <option key={s.id} value={`${s.id}. ${s.name}`}>{s.id}. {s.name}</option>
@@ -6526,7 +6526,7 @@ ${JSON.stringify(cutPayload)}`,
                   <select 
                     value={ui.cuts.ratio}
                     onChange={(e) => setUi(prev => ({ ...prev, cuts: { ...prev.cuts, ratio: e.target.value } }))}
-                    className="bg-slate-800 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer min-w-[100px]"
+                    className="w-full sm:w-auto bg-slate-800 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer sm:min-w-[100px]"
                   >
                     <option value="16:9">16:9</option>
                     <option value="9:16">9:16</option>
@@ -6538,7 +6538,7 @@ ${JSON.stringify(cutPayload)}`,
                 <button 
                   onClick={splitCuts}
                   disabled={!ui.script.output}
-                  className={`text-black font-black px-6 py-2 rounded-xl transition-all disabled:opacity-50 text-xs flex items-center justify-center gap-2 min-w-[120px] ${ui.cuts.splitting ? 'running-gradient' : 'bg-amber-500 hover:bg-amber-600'}`}
+                  className={`w-full sm:w-auto text-black font-black px-6 py-2 rounded-xl transition-all disabled:opacity-50 text-xs flex items-center justify-center gap-2 sm:min-w-[120px] ${ui.cuts.splitting ? 'running-gradient' : 'bg-amber-500 hover:bg-amber-600'}`}
                 >
                   {ui.cuts.splitting ? <><Loader2 className="w-4 h-4 animate-spin" /> 분할 중...</> : '컷 분할'}
                 </button>
@@ -6546,7 +6546,7 @@ ${JSON.stringify(cutPayload)}`,
                 <button 
                   onClick={generateImagePrompts}
                   disabled={ui.cuts.items.length === 0}
-                  className={`text-black font-black px-6 py-2 rounded-xl transition-all disabled:opacity-50 text-xs flex items-center justify-center gap-2 min-w-[140px] ${ui.tts.status === '프롬프트 생성 중...' ? 'running-gradient' : 'bg-cyan-500 hover:bg-cyan-600'}`}
+                  className={`w-full sm:w-auto text-black font-black px-6 py-2 rounded-xl transition-all disabled:opacity-50 text-xs flex items-center justify-center gap-2 sm:min-w-[140px] ${ui.tts.status === '프롬프트 생성 중...' ? 'running-gradient' : 'bg-cyan-500 hover:bg-cyan-600'}`}
                 >
                   {ui.tts.status === '프롬프트 생성 중...' ? <><Loader2 className="w-4 h-4 animate-spin" /> 중지</> : '프롬프트 생성'}
                 </button>
