@@ -2932,18 +2932,21 @@ JSON만 반환:
     setUi(prev => ({ ...prev, cuts: { ...prev.cuts, items, splitting: false } }));
   };
 
-  const runAutoImageBatch = async () => {
+  const runAutoImageBatch = async (targetCuts?: number[]) => {
     if (autoImageBatchRunning) {
       abortRef.current = true;
       setAutoImageBatchRunning(false);
-      return { aborted: true, failCount: 0 };
+      return { aborted: true, failCount: 0, failedCuts: [] as number[] };
     }
 
     abortRef.current = false;
     setAutoImageBatchRunning(true);
     let failCount = 0;
     const prompts = [...(latestUiRef.current?.cuts?.prompts || [])];
-    for (const cut of prompts) {
+    const queue = targetCuts?.length
+      ? prompts.filter((cut: any) => targetCuts.includes(cut.index))
+      : prompts;
+    for (const cut of queue) {
       if (abortRef.current) break;
       let ok = false;
       for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -2966,11 +2969,14 @@ JSON만 반환:
       await new Promise(r => setTimeout(r, 1200));
     }
     setAutoImageBatchRunning(false);
-    const finalFailCount = prompts.filter(cut => {
-      const job = latestUiRef.current?.imageJobs?.find((j: any) => j.cut === cut.index);
-      return !job?.imageUrl;
-    }).length;
-    return { aborted: abortRef.current, failCount: finalFailCount };
+    const failedCuts = queue
+      .filter((cut: any) => {
+        const job = latestUiRef.current?.imageJobs?.find((j: any) => j.cut === cut.index);
+        return !job?.imageUrl;
+      })
+      .map((cut: any) => cut.index);
+    const finalFailCount = failedCuts.length;
+    return { aborted: abortRef.current, failCount: finalFailCount, failedCuts };
   };
 
   const runOneClickFromTitle = async (
@@ -3000,6 +3006,85 @@ JSON만 반환:
         await new Promise(r => setTimeout(r, intervalMs));
       }
       return false;
+    };
+
+    const waitDelay = async (ms: number) => new Promise(r => setTimeout(r, ms));
+
+    const ensureCutSplit = async () => {
+      let rounds = 0;
+      const started = Date.now();
+      while (true) {
+        for (let i = 0; i < 3; i += 1) {
+          appendAutoLog(`컷 분할 시도 (${rounds * 3 + i + 1})`);
+          await actionApiRef.current.splitCuts();
+          const ok = await waitFor(() => (latestUiRef.current?.cuts?.items || []).length > 0, 50000, 350);
+          if (ok) {
+            appendAutoLog('컷 분할 완료');
+            return;
+          }
+        }
+        rounds += 1;
+        if (Date.now() - started > 20 * 60 * 1000) {
+          throw new Error('컷 분할 재시도 제한 시간 초과');
+        }
+        appendAutoLog('컷 분할 재시도 대기(30초)');
+        await waitDelay(30000);
+      }
+    };
+
+    const getMissingPromptCuts = () => {
+      const items = latestUiRef.current?.cuts?.items || [];
+      const prompts = latestUiRef.current?.cuts?.prompts || [];
+      const missing: number[] = [];
+      for (let i = 0; i < items.length; i += 1) {
+        const index = i + 1;
+        const found = prompts.find((p: any) => p.index === index);
+        if (!found || !String(found.prompt || '').trim()) {
+          missing.push(index);
+        }
+      }
+      return missing;
+    };
+
+    const ensurePrompts = async () => {
+      let missing = getMissingPromptCuts();
+      let rounds = 0;
+      const started = Date.now();
+      while (missing.length > 0) {
+        for (let i = 0; i < 3; i += 1) {
+          appendAutoLog(`프롬프트 재시도: ${missing.join(', ')} (${rounds * 3 + i + 1})`);
+          await actionApiRef.current.generateImagePrompts();
+          missing = getMissingPromptCuts();
+          if (missing.length === 0) return;
+        }
+        rounds += 1;
+        if (Date.now() - started > 20 * 60 * 1000) {
+          throw new Error(`프롬프트 미완료(시간 초과): ${missing.join(', ')}`);
+        }
+        appendAutoLog(`프롬프트 재시도 대기(30초): ${missing.join(', ')}`);
+        await waitDelay(30000);
+      }
+    };
+
+    const ensureImages = async () => {
+      let pending: number[] = [];
+      let rounds = 0;
+      const started = Date.now();
+      while (true) {
+        const result = await runAutoImageBatch(pending.length ? pending : undefined);
+        if (result.aborted) throw new Error('이미지 자동 생성이 중지되었습니다.');
+        if (result.failCount === 0) {
+          appendAutoLog('이미지 전체 완료');
+          return;
+        }
+        pending = result.failedCuts;
+        rounds += 1;
+        if (Date.now() - started > 25 * 60 * 1000) {
+          throw new Error('이미지 자동 생성 재시도 제한 시간 초과');
+        }
+        appendAutoLog(`이미지 재시도 대기(30초): ${pending.join(', ')}`);
+        await waitDelay(30000);
+      }
     };
 
     const withRetries = async (label: string, fn: () => Promise<void>, verify: () => boolean, attempts = 2) => {
@@ -3122,8 +3207,20 @@ JSON만 반환:
 
       await actionApiRef.current.rewriteTemplateTitleFromHook();
 
+      await withRetries(
+        '설명/태그 생성',
+        () => actionApiRef.current.generateDescription(),
+        () => Boolean(latestUiRef.current?.description?.kr?.title || latestUiRef.current?.description?.kr?.desc),
+        2,
+      );
+
+      const ttsProvider = fixedEnabled && fixed?.ttsProvider === 'elevenlabs' ? 'elevenlabs' : 'gemini';
+      const styleReady = await waitFor(() => Boolean(latestUiRef.current?.tts?.styleInstructions?.trim()), 15000, 350);
+      if (!styleReady) {
+        appendAutoLog('낭독 스타일 미확정(기본값 진행)');
+      }
+
       try {
-        const ttsProvider = fixedEnabled && fixed?.ttsProvider === 'elevenlabs' ? 'elevenlabs' : 'gemini';
         await withRetries(
           'TTS 생성',
           () => actionApiRef.current.handleGenerateTTS(ttsProvider),
@@ -3145,7 +3242,7 @@ JSON만 반환:
         try {
           await withRetries(
             'TTS 재생성(20초 보정)',
-            () => actionApiRef.current.handleGenerateTTS(),
+            () => actionApiRef.current.handleGenerateTTS(ttsProvider),
             () => Boolean(latestUiRef.current?.tts?.audioUrl) && Number(latestUiRef.current?.tts?.measuredDuration || 0) <= 20,
             2,
           );
@@ -3155,12 +3252,7 @@ JSON만 반환:
         }
       }
 
-      await withRetries(
-        '컷 분할',
-        () => actionApiRef.current.splitCuts(),
-        () => (latestUiRef.current?.cuts?.items || []).length > 0,
-        2,
-      );
+      await ensureCutSplit();
 
       if (opts?.productMode) {
         const targetCuts = Math.max(3, Math.min(8, Number(opts?.productTargetCuts ?? 5)));
@@ -3177,10 +3269,10 @@ JSON만 반환:
         },
         2,
       );
+      await ensurePrompts();
 
       setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '이미지 자동 생성' } }));
-      const imageBatch = await runAutoImageBatch();
-      if (imageBatch.aborted) throw new Error('이미지 생성 중지됨');
+      await ensureImages();
 
       if (opts?.productMode && latestUiRef.current?.productPromo?.imageUrl) {
         const fallbackImage = latestUiRef.current.productPromo.imageUrl;
@@ -3229,9 +3321,6 @@ JSON만 반환:
         },
         2,
       );
-
-      setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: '설명/태그 생성' } }));
-      await actionApiRef.current.generateDescription();
 
       const current = latestUiRef.current;
       const autoTitle = (current?.description?.kr?.title || title || '').trim();
