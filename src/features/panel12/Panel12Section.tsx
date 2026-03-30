@@ -154,6 +154,7 @@ export default function Panel12Section(props: Props) {
   const previewAudioRef = React.useRef<HTMLAudioElement | null>(null);
   const [previewAudioPath, setPreviewAudioPath] = React.useState('');
   const [previewAudioType, setPreviewAudioType] = React.useState<'' | 'bgm' | 'sfx'>('');
+  const [previewGuides, setPreviewGuides] = React.useState({ shorts: true, reels: false, tiktok: false });
   const previewTemplate = BUILTIN_SUBTITLE_TEMPLATES.find(t => t.id === previewTemplateId) || BUILTIN_SUBTITLE_TEMPLATES[0];
   const maxHookVideoCount = Math.max(1, ui.cuts.items?.length || 1);
 
@@ -646,16 +647,17 @@ export default function Panel12Section(props: Props) {
                           </div>
                           {ui.finalVideo.templateTitleEnabled && (
                             <>
-                              <input
-                                value={ui.finalVideo.templateTitleText}
-                                onChange={(e) => {
-                                  setTemplateTitleManualEdited(true);
-                                  setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleText: e.target.value } }));
-                                }}
-                                placeholder="템플릿 스타일로 넣을 제목"
-                                className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
-                                maxLength={90}
-                              />
+                                <input
+                                  value={ui.finalVideo.templateTitleText}
+                                  onChange={(e) => {
+                                    setTemplateTitleManualEdited(true);
+                                    const compact = Array.from(String(e.target.value || '').replace(/\r?\n/g, ' ').trim()).slice(0, 20).join('');
+                                    setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleText: compact } }));
+                                  }}
+                                  placeholder="템플릿 스타일로 넣을 제목"
+                                  className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
+                                  maxLength={20}
+                                />
                               {templateTitleManualEdited && (
                                 <p className="text-[10px] text-amber-200/95 bg-amber-500/10 border border-amber-300/25 rounded-md px-2 py-1">
                                   수동 수정됨: 자동 제목 덮어쓰기는 템플릿을 다시 클릭할 때만 실행됩니다.
@@ -803,6 +805,7 @@ export default function Panel12Section(props: Props) {
                         <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">줄당 글자수</label>
                         <span className="text-[10px] text-emerald-100 font-bold">{ui.finalVideo.subtitleMaxChars}자</span>
                       </div>
+                      <p className="text-[10px] text-slate-400">줄당 글자수는 자막 한 줄에서 허용할 최대 문자 수입니다. (제목 길이 설정 아님)</p>
                       <InlineSmoothRange
                         min={14}
                         max={34}
@@ -1031,7 +1034,25 @@ export default function Panel12Section(props: Props) {
               </div>
             </div>
 
-            <div className="bg-black/40 border border-white/5 rounded-[2rem] p-6 flex flex-col items-center justify-center text-center space-y-4">
+            <div className="bg-black/40 border border-white/5 rounded-[2rem] p-6 flex flex-col items-stretch justify-start text-center space-y-4 md:sticky md:top-4 self-start">
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {[
+                  { key: 'shorts', label: 'YouTube Shorts' },
+                  { key: 'reels', label: 'Instagram Reels' },
+                  { key: 'tiktok', label: 'TikTok' },
+                ].map(item => {
+                  const active = (previewGuides as any)[item.key];
+                  return (
+                    <button
+                      key={item.key}
+                      onClick={() => setPreviewGuides(prev => ({ ...prev, [item.key]: !active }))}
+                      className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-black transition-all ${active ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-white/5 text-slate-300 border-white/10'}`}
+                    >
+                      {item.label} {active ? 'ON' : 'OFF'}
+                    </button>
+                  );
+                })}
+              </div>
               {ui.finalVideo.url ? (
                 <div className="w-full bg-black rounded-2xl overflow-hidden relative border border-white/10" style={{ aspectRatio: ratioToCss(ui.cuts.ratio || '16:9') }}>
                   {ui.finalVideo.url.startsWith('data:image') ? (
@@ -1080,6 +1101,31 @@ export default function Panel12Section(props: Props) {
                           {ui.cuts.items[(ui.finalVideo.slides[ui.finalVideo.activeSlide]?.cut || 1) - 1] || ''}
                         </p>
                       </div>
+                    )}
+                    {ui.finalVideo.templateTitleEnabled && Boolean(ui.finalVideo.templateTitleText) && (
+                      <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none" style={{ top: `${Math.max(5, Number(ui.finalVideo.templateTitleLine1TopMm || 20))}%` }}>
+                        <p
+                          className="font-black tracking-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] whitespace-pre-line text-center"
+                          style={{
+                            color: ui.finalVideo.templateTitleLine1Color || '#ff554a',
+                            fontFamily: ui.finalVideo.templateTitleFontFamily || 'Pretendard',
+                            transform: `scale(${Number(ui.finalVideo.templateTitleScale || 1)})`,
+                          }}
+                        >
+                          {String(ui.finalVideo.templateTitleText || '').slice(0, 20)}
+                        </p>
+                      </div>
+                    )}
+                    {(previewGuides.shorts || previewGuides.reels || previewGuides.tiktok) && (
+                      <>
+                        <div className="absolute top-0 left-0 right-0 h-[11%] bg-black/25 pointer-events-none" />
+                        <div className="absolute bottom-0 left-0 right-0 h-[12%] bg-black/25 pointer-events-none" />
+                        <div className="absolute top-2 left-2 flex flex-col gap-1 pointer-events-none">
+                          {previewGuides.shorts && <span className="text-[9px] px-2 py-0.5 rounded bg-red-500/75 text-white font-black">Shorts UI</span>}
+                          {previewGuides.reels && <span className="text-[9px] px-2 py-0.5 rounded bg-pink-500/75 text-white font-black">Reels UI</span>}
+                          {previewGuides.tiktok && <span className="text-[9px] px-2 py-0.5 rounded bg-cyan-500/75 text-black font-black">TikTok UI</span>}
+                        </div>
+                      </>
                     )}
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-[10px]">
