@@ -1688,6 +1688,18 @@ export default function App() {
       lastTitle: '',
       error: '',
       log: [] as Array<{ at: string; message: string }>,
+      fixedEnabled: false,
+      fixed: {
+        scriptType: 'shorts' as 'shorts' | 'long-form',
+        scriptLength: '60초',
+        scriptLang: 'KR' as 'KR' | 'EN' | 'JP',
+        videoStyle: '01. 뉴스/다큐',
+        ttsProvider: 'gemini' as 'gemini' | 'elevenlabs',
+        ttsVoice: 'Kore',
+        elevenlabsVoice: 'elv_adam',
+        bgmTrack: DEFAULT_NON_RELIGIOUS_BGM,
+        ratio: '9:16' as '9:16' | '16:9' | '1:1' | '3:4',
+      },
     },
     productPromo: {
       imageUrl: '',
@@ -1758,6 +1770,7 @@ export default function App() {
   const isAutoRunning = ui.autoFlow.running || ui.productPromo.running;
   const currentAutoStep = ui.autoFlow.running ? ui.autoFlow.step : ui.productPromo.running ? ui.productPromo.step : '';
   const currentAutoTitle = ui.autoFlow.running ? ui.autoFlow.lastTitle : ui.productPromo.running ? '상품홍보 원클릭' : '';
+  const isOneClickFixed = Boolean(ui.autoFlow.fixedEnabled);
   const autoProgress = useMemo(() => {
     if (ui.autoFlow.running) {
       const normalized = (ui.autoFlow.step || '').split(' (')[0];
@@ -2402,7 +2415,7 @@ ${ui.script.output}
 
 [작성 지침]
 1. 최종 제목: 클릭을 유도하는 강력한 후킹 문구를 포함하세요.
-2. 설명란: 100만 뷰 영상의 구조(도입부 요약, 내용 상세, 관련 링크 안내 등)를 참고하여 작성하세요. **타임라인(시간대별 요약)은 아직 작성하지 마세요.**
+2. 설명란: 1000만 뷰 영상의 구조(도입부 요약, 내용 상세, 관련 링크 안내 등)를 참고하여 작성하세요. **타임라인(시간대별 요약)은 아직 작성하지 마세요.**
 3. 해시태그: 영상의 핵심 키워드 3~5개를 #형태로 작성하세요.
 4. 태그: 검색 최적화(SEO)를 위한 연관 키워드들을 콤마(,)로 구분하여 작성하세요.
 
@@ -2513,6 +2526,47 @@ ${ui.selectedHookTitle}
     } catch (err) {
       console.error(err);
       setUi(prev => ({ ...prev, script: { ...prev.script, generating: false } }));
+    }
+  };
+
+  const inferAudienceAndTone = async (title: string, lang: 'KR' | 'EN' | 'JP') => {
+    if (!keys.g1) return null;
+    try {
+      const ai = new GoogleGenAI({ apiKey: keys.g1 });
+      const trendContext = (results || [])
+        .slice(0, 8)
+        .map((r: any, i: number) => `${i + 1}) ${r.title} | 조회수 ${formatNumber(Number(r.viewCount || 0))}`)
+        .join('\n');
+
+      const prompt = `당신은 유튜브 콘텐츠 분석가입니다.
+다음 정보를 종합해 타깃 시청자와 톤/분위기를 추천하세요.
+
+[선택된 제목]
+${title}
+
+[최근 검색 결과 요약]
+${trendContext || '데이터 없음'}
+
+[언어]
+${lang}
+
+JSON만 반환:
+{"audience":"...","tone":"..."}`;
+
+      const response = await generateContentWithFallback(ai, {
+        model: 'gemini-3-flash-preview',
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+
+      const parsed = JSON.parse(response.text || '{}');
+      const audience = String(parsed?.audience || '').trim();
+      const tone = String(parsed?.tone || '').trim();
+      if (!audience && !tone) return null;
+      return { audience: audience || '20~40대 일반', tone: tone || '정보형, 설득력' };
+    } catch (err) {
+      console.error(err);
+      return null;
     }
   };
 
@@ -2978,6 +3032,58 @@ ${ui.selectedHookTitle}
 
     try {
       await new Promise(r => setTimeout(r, 0));
+      const fixedEnabled = Boolean(latestUiRef.current?.autoFlow?.fixedEnabled);
+      const fixed = latestUiRef.current?.autoFlow?.fixed;
+      if (fixedEnabled && fixed && !opts?.productMode) {
+        setUi(prev => ({
+          ...prev,
+          script: {
+            ...prev.script,
+            type: fixed.scriptType || prev.script.type,
+            length: fixed.scriptLength || prev.script.length,
+            lang: fixed.scriptLang || prev.script.lang,
+          },
+          videoStyle: {
+            ...prev.videoStyle,
+            selected: fixed.videoStyle || prev.videoStyle.selected,
+          },
+          tts: {
+            ...prev.tts,
+            model: prev.tts.model || 'gemini-2.5-flash-preview-tts',
+            voice: fixed.ttsProvider === 'gemini' ? (fixed.ttsVoice || prev.tts.voice) : prev.tts.voice,
+            elevenlabsVoice: fixed.ttsProvider === 'elevenlabs' ? (fixed.elevenlabsVoice || prev.tts.elevenlabsVoice) : prev.tts.elevenlabsVoice,
+            selectedToneId: 'default',
+          },
+          cuts: {
+            ...prev.cuts,
+            ratio: fixed.ratio || prev.cuts.ratio,
+          },
+          thumbnail: {
+            ...prev.thumbnail,
+            ratio: fixed.ratio || prev.thumbnail.ratio,
+          },
+          finalVideo: {
+            ...prev.finalVideo,
+            bgmEnabled: Boolean(fixed.bgmTrack),
+            bgmTrack: fixed.bgmTrack || prev.finalVideo.bgmTrack,
+            bgmTrackUserSelected: true,
+            sfxEnabled: false,
+          },
+        }));
+        await new Promise(r => setTimeout(r, 0));
+        const inferred = await inferAudienceAndTone(title, fixed.scriptLang || 'KR');
+        if (inferred) {
+          setUi(prev => ({
+            ...prev,
+            script: {
+              ...prev.script,
+              targetAudience: inferred.audience || prev.script.targetAudience,
+              tone: inferred.tone || prev.script.tone,
+            },
+          }));
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
       if (opts?.productMode) {
         const productRenderMode = opts?.productRenderMode || 'image_slide';
         const productHookVideoCount = Math.max(0, Number(opts?.productHookVideoCount ?? 2));
@@ -3017,9 +3123,10 @@ ${ui.selectedHookTitle}
       await actionApiRef.current.rewriteTemplateTitleFromHook();
 
       try {
+        const ttsProvider = fixedEnabled && fixed?.ttsProvider === 'elevenlabs' ? 'elevenlabs' : 'gemini';
         await withRetries(
           'TTS 생성',
-          () => actionApiRef.current.handleGenerateTTS(),
+          () => actionApiRef.current.handleGenerateTTS(ttsProvider),
           () => Boolean(latestUiRef.current?.tts?.audioUrl),
           2,
         );
@@ -5998,9 +6105,228 @@ ${JSON.stringify(cutPayload)}`,
                   {ui.autoFlow.step && <p className="text-[11px] text-emerald-300 font-bold mt-1">진행 단계: {ui.autoFlow.step}</p>}
                   {ui.autoFlow.error && <p className="text-[11px] text-rose-300 font-bold mt-1">오류: {ui.autoFlow.error}</p>}
                 </div>
-                <span className="px-4 py-2 rounded-xl text-xs font-black border bg-emerald-400 text-black border-emerald-300">
-                  원클릭 고정 ON
-                </span>
+                <button
+                  onClick={() => setUi(prev => ({
+                    ...prev,
+                    autoFlow: {
+                      ...prev.autoFlow,
+                      fixedEnabled: !prev.autoFlow.fixedEnabled,
+                    },
+                    ...(prev.autoFlow.fixedEnabled
+                      ? {}
+                      : {
+                          script: {
+                            ...prev.script,
+                            type: prev.autoFlow.fixed.scriptType || prev.script.type,
+                            length: prev.autoFlow.fixed.scriptLength || prev.script.length,
+                            lang: prev.autoFlow.fixed.scriptLang || prev.script.lang,
+                          },
+                          videoStyle: {
+                            ...prev.videoStyle,
+                            selected: prev.autoFlow.fixed.videoStyle || prev.videoStyle.selected,
+                          },
+                          tts: {
+                            ...prev.tts,
+                            voice: prev.autoFlow.fixed.ttsProvider === 'gemini'
+                              ? (prev.autoFlow.fixed.ttsVoice || prev.tts.voice)
+                              : prev.tts.voice,
+                            elevenlabsVoice: prev.autoFlow.fixed.ttsProvider === 'elevenlabs'
+                              ? (prev.autoFlow.fixed.elevenlabsVoice || prev.tts.elevenlabsVoice)
+                              : prev.tts.elevenlabsVoice,
+                          },
+                          cuts: {
+                            ...prev.cuts,
+                            ratio: prev.autoFlow.fixed.ratio || prev.cuts.ratio,
+                          },
+                          thumbnail: {
+                            ...prev.thumbnail,
+                            ratio: prev.autoFlow.fixed.ratio || prev.thumbnail.ratio,
+                          },
+                          finalVideo: {
+                            ...prev.finalVideo,
+                            bgmEnabled: Boolean(prev.autoFlow.fixed.bgmTrack),
+                            bgmTrack: prev.autoFlow.fixed.bgmTrack || prev.finalVideo.bgmTrack,
+                            bgmTrackUserSelected: true,
+                            sfxEnabled: false,
+                          },
+                        }),
+                  }))}
+                  className={`px-4 py-2 rounded-xl text-xs font-black border transition-all ${ui.autoFlow.fixedEnabled ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-white/5 text-slate-200 border-white/10 hover:bg-white/10'}`}
+                >
+                  원클릭 고정 {ui.autoFlow.fixedEnabled ? 'ON' : 'OFF'}
+                </button>
+              </div>
+
+              <div className="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-4 space-y-3">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-[11px] font-black text-cyan-100 uppercase tracking-widest">원클릭 고정 설정</p>
+                  <p className="text-[10px] text-cyan-100/80">고정 ON일 때 4/5/8/12 패널 입력은 잠금됩니다.</p>
+                </div>
+                {ui.autoFlow.fixedEnabled ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-cyan-100 uppercase tracking-widest">대본 타입</label>
+                      <select
+                        value={ui.autoFlow.fixed.scriptType}
+                        onChange={(e) => {
+                          const nextType = e.target.value as 'shorts' | 'long-form';
+                          setUi(prev => ({
+                            ...prev,
+                            autoFlow: {
+                              ...prev.autoFlow,
+                              fixed: {
+                                ...prev.autoFlow.fixed,
+                                scriptType: nextType,
+                                scriptLength: nextType === 'shorts' ? '60초' : '10분',
+                              },
+                            },
+                          }));
+                        }}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      >
+                        <option value="shorts">쇼츠</option>
+                        <option value="long-form">롱폼</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-cyan-100 uppercase tracking-widest">길이 선택</label>
+                      <select
+                        value={ui.autoFlow.fixed.scriptLength}
+                        onChange={(e) => setUi(prev => ({
+                          ...prev,
+                          autoFlow: { ...prev.autoFlow, fixed: { ...prev.autoFlow.fixed, scriptLength: e.target.value } },
+                        }))}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      >
+                        {ui.autoFlow.fixed.scriptType === 'shorts' ? (
+                          <>
+                            <option value="15초">15초</option>
+                            <option value="30초">30초</option>
+                            <option value="60초">60초</option>
+                          </>
+                        ) : (
+                          <>
+                            <option value="10분">10분</option>
+                            <option value="20분">20분</option>
+                            <option value="30분">30분</option>
+                            <option value="60분">60분</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-cyan-100 uppercase tracking-widest">언어</label>
+                      <select
+                        value={ui.autoFlow.fixed.scriptLang}
+                        onChange={(e) => setUi(prev => ({
+                          ...prev,
+                          autoFlow: { ...prev.autoFlow, fixed: { ...prev.autoFlow.fixed, scriptLang: e.target.value as any } },
+                        }))}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      >
+                        <option value="KR">KR</option>
+                        <option value="EN">EN</option>
+                        <option value="JP">JP</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-cyan-100 uppercase tracking-widest">화면 비율</label>
+                      <select
+                        value={ui.autoFlow.fixed.ratio}
+                        onChange={(e) => setUi(prev => ({
+                          ...prev,
+                          autoFlow: { ...prev.autoFlow, fixed: { ...prev.autoFlow.fixed, ratio: e.target.value as any } },
+                        }))}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      >
+                        <option value="9:16">9:16 (쇼츠/릴스)</option>
+                        <option value="16:9">16:9 (롱폼)</option>
+                        <option value="1:1">1:1</option>
+                        <option value="3:4">3:4</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-cyan-100 uppercase tracking-widest">영상 스타일</label>
+                      <select
+                        value={ui.autoFlow.fixed.videoStyle}
+                        onChange={(e) => setUi(prev => ({
+                          ...prev,
+                          autoFlow: { ...prev.autoFlow, fixed: { ...prev.autoFlow.fixed, videoStyle: e.target.value } },
+                        }))}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      >
+                        {VIDEO_STYLES_31.map(style => (
+                          <option key={style.id} value={`${style.id}. ${style.name}`}>{style.id}. {style.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-cyan-100 uppercase tracking-widest">TTS 엔진</label>
+                      <select
+                        value={ui.autoFlow.fixed.ttsProvider}
+                        onChange={(e) => setUi(prev => ({
+                          ...prev,
+                          autoFlow: { ...prev.autoFlow, fixed: { ...prev.autoFlow.fixed, ttsProvider: e.target.value as any } },
+                        }))}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      >
+                        <option value="gemini">Gemini TTS</option>
+                        <option value="elevenlabs">ElevenLabs TTS</option>
+                      </select>
+                    </div>
+                    {ui.autoFlow.fixed.ttsProvider === 'gemini' ? (
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-cyan-100 uppercase tracking-widest">TTS 목소리</label>
+                        <select
+                          value={ui.autoFlow.fixed.ttsVoice}
+                          onChange={(e) => setUi(prev => ({
+                            ...prev,
+                            autoFlow: { ...prev.autoFlow, fixed: { ...prev.autoFlow.fixed, ttsVoice: e.target.value } },
+                          }))}
+                          className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                        >
+                          {GEMINI_TTS_VOICES.map(v => (
+                            <option key={v.id} value={v.id}>{v.label} ({v.gender})</option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-cyan-100 uppercase tracking-widest">ElevenLabs 목소리</label>
+                        <select
+                          value={ui.autoFlow.fixed.elevenlabsVoice}
+                          onChange={(e) => setUi(prev => ({
+                            ...prev,
+                            autoFlow: { ...prev.autoFlow, fixed: { ...prev.autoFlow.fixed, elevenlabsVoice: e.target.value } },
+                          }))}
+                          className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                        >
+                          {ELEVENLABS_VOICES.map(voice => (
+                            <option key={voice.id} value={voice.id}>{voice.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-cyan-100 uppercase tracking-widest">배경음악</label>
+                      <select
+                        value={ui.autoFlow.fixed.bgmTrack}
+                        onChange={(e) => setUi(prev => ({
+                          ...prev,
+                          autoFlow: { ...prev.autoFlow, fixed: { ...prev.autoFlow.fixed, bgmTrack: e.target.value } },
+                        }))}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      >
+                        <option value="">없음</option>
+                        {BGM_LIBRARY.map(track => (
+                          <option key={track.path} value={track.path}>{track.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-300">원클릭 고정을 켜면 이 영역에서 자동 제작 옵션을 지정할 수 있습니다.</p>
+                )}
               </div>
 
               <button 
@@ -6067,6 +6393,7 @@ ${JSON.stringify(cutPayload)}`,
               <div className="space-y-1">
                 <p className="text-sm text-slate-400">선택한 제목과 검색 결과를 기반으로 대본을 생성합니다.</p>
                 <p className="text-xs text-blue-400 font-bold">선택한 제목: {ui.selectedHookTitle || '없음'}</p>
+                {isOneClickFixed && <p className="text-[10px] text-cyan-300">원클릭 고정 ON: 대본 설정은 3번 패널에서 지정합니다.</p>}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -6076,7 +6403,8 @@ ${JSON.stringify(cutPayload)}`,
                   <select 
                     value={ui.script.type}
                     onChange={(e) => setUi(prev => ({ ...prev, script: { ...prev.script, type: e.target.value as any } }))}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-blue-500/50"
+                    disabled={isOneClickFixed}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="shorts">쇼츠</option>
                     <option value="long-form">롱폼</option>
@@ -6092,7 +6420,8 @@ ${JSON.stringify(cutPayload)}`,
                   <select 
                     value={ui.script.length}
                     onChange={(e) => setUi(prev => ({ ...prev, script: { ...prev.script, length: e.target.value } }))}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-blue-500/50"
+                    disabled={isOneClickFixed}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {ui.script.type === 'shorts' ? (
                       <>
@@ -6117,7 +6446,8 @@ ${JSON.stringify(cutPayload)}`,
                   <select 
                     value={ui.script.lang}
                     onChange={(e) => setUi(prev => ({ ...prev, script: { ...prev.script, lang: e.target.value as any } }))}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-blue-500/50"
+                    disabled={isOneClickFixed}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="KR">한국어</option>
                     <option value="EN">영어</option>
@@ -6219,16 +6549,18 @@ ${JSON.stringify(cutPayload)}`,
           
           {ui.panelsOpen.p_style && ui.videoStyle.show && (
             <div className="space-y-6">
+              {isOneClickFixed && <p className="text-[10px] text-cyan-300">원클릭 고정 ON: 영상스타일은 3번 패널 설정을 따릅니다.</p>}
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
                 {VIDEO_STYLES_31.map((style) => (
                   <button
                     key={style.id}
                     onClick={() => setUi(prev => ({ ...prev, videoStyle: { ...prev.videoStyle, selected: `${style.id}. ${style.name}` } }))}
+                    disabled={isOneClickFixed}
                     className={`group relative aspect-square rounded-2xl overflow-hidden border-2 transition-all ${
                       ui.videoStyle.selected.includes(style.name) 
                         ? 'border-amber-400 scale-95 shadow-[0_0_15px_rgba(251,191,36,0.3)]' 
                         : 'border-transparent hover:border-white/20'
-                    }`}
+                    } ${isOneClickFixed ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <img 
                       src={style.thumbnail || `https://picsum.photos/seed/${style.keyword}/200/200`} 
@@ -6433,7 +6765,8 @@ ${JSON.stringify(cutPayload)}`,
                         <select 
                           value={ui.tts.model}
                           onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, model: e.target.value } }))}
-                          className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer"
+                          disabled={isOneClickFixed}
+                          className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                         {GEMINI_TTS_ONLY_MODELS.map(m => (
                           <option key={m.id} value={m.id} className="bg-slate-800 text-white">{m.label}</option>
@@ -6460,7 +6793,8 @@ ${JSON.stringify(cutPayload)}`,
                       <select 
                         value={ui.tts.voice}
                         onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, voice: e.target.value } }))}
-                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer"
+                        disabled={isOneClickFixed}
+                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {GEMINI_TTS_VOICES.map(v => (
                           <option key={v.id} value={v.id} className="bg-slate-800 text-white">{v.label} ({v.gender})</option>
@@ -6480,7 +6814,8 @@ ${JSON.stringify(cutPayload)}`,
                         <select 
                           value={ui.tts.selectedToneId}
                           onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, selectedToneId: e.target.value } }))}
-                          className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none focus:ring-2 ring-cyan-500/50 cursor-pointer appearance-none"
+                          disabled={isOneClickFixed}
+                          className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none focus:ring-2 ring-cyan-500/50 cursor-pointer appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {TONE_STYLES.map(s => (
                             <option key={s.id} value={s.id} className="bg-slate-800 text-white">{s.label}</option>
@@ -6490,7 +6825,8 @@ ${JSON.stringify(cutPayload)}`,
                           value={ui.tts.styleInstructions}
                           onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, styleInstructions: e.target.value } }))}
                           placeholder="AI에게 전달할 낭독 스타일 지침..."
-                          className="w-full bg-slate-800 border border-white/10 rounded-lg p-3 text-[10px] text-slate-300 outline-none h-16 resize-none focus:ring-2 ring-cyan-500/50"
+                          disabled={isOneClickFixed}
+                          className="w-full bg-slate-800 border border-white/10 rounded-lg p-3 text-[10px] text-slate-300 outline-none h-16 resize-none focus:ring-2 ring-cyan-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
                         />
                       </div>
                     </div>
@@ -6525,7 +6861,8 @@ ${JSON.stringify(cutPayload)}`,
                         <select
                           value={ui.tts.elevenlabsModel}
                           onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, elevenlabsModel: e.target.value } }))}
-                          className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-indigo-500/50 appearance-none cursor-pointer"
+                          disabled={isOneClickFixed}
+                          className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-indigo-500/50 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {ELEVENLABS_MODELS.map(model => (
                             <option key={model.id} value={model.id} className="bg-slate-800 text-white">{model.label}</option>
@@ -6552,7 +6889,8 @@ ${JSON.stringify(cutPayload)}`,
                       <select
                         value={ui.tts.elevenlabsVoice}
                         onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, elevenlabsVoice: e.target.value } }))}
-                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-indigo-500/50 appearance-none cursor-pointer"
+                        disabled={isOneClickFixed}
+                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-indigo-500/50 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {ELEVENLABS_VOICES.map(voice => (
                           <option key={voice.id} value={voice.id} className="bg-slate-800 text-white">{voice.label}</option>
@@ -6614,7 +6952,8 @@ ${JSON.stringify(cutPayload)}`,
                   <select 
                     value={ui.cuts.ratio}
                     onChange={(e) => setUi(prev => ({ ...prev, cuts: { ...prev.cuts, ratio: e.target.value } }))}
-                    className="w-full sm:w-auto bg-slate-800 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer sm:min-w-[100px]"
+                    disabled={isOneClickFixed}
+                    className="w-full sm:w-auto bg-slate-800 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer sm:min-w-[100px] disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="16:9">16:9</option>
                     <option value="9:16">9:16</option>
@@ -6994,6 +7333,7 @@ ${JSON.stringify(cutPayload)}`,
           gridPositionToPercent={gridPositionToPercent}
           getBuiltinTemplatePreview={getBuiltinTemplatePreview}
           syncReport={syncReport}
+          isOneClickFixed={isOneClickFixed}
         />
 
         {/* 13. 영상편집 */}

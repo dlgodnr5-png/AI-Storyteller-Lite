@@ -44,6 +44,7 @@ type Props = {
     deltaSec: number;
     status: '정상' | '주의' | '실패';
   };
+  isOneClickFixed?: boolean;
 };
 
 const InlineSmoothRange = React.memo(({
@@ -145,6 +146,7 @@ export default function Panel12Section(props: Props) {
     gridPositionToPercent,
     getBuiltinTemplatePreview,
     syncReport,
+    isOneClickFixed,
   } = props;
 
   const [previewTemplateId, setPreviewTemplateId] = React.useState<string>(BUILTIN_SUBTITLE_TEMPLATES[0]?.id || '');
@@ -252,7 +254,8 @@ export default function Panel12Section(props: Props) {
                 <select
                   value={ui.finalVideo.bgmTrack}
                   onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, bgmTrack: e.target.value, bgmTrackUserSelected: true } }))}
-                  className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
+                  disabled={isOneClickFixed}
+                  className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {BGM_LIBRARY.map(track => (
                     <option key={track.path} value={track.path}>{track.label}</option>
@@ -260,7 +263,8 @@ export default function Panel12Section(props: Props) {
                 </select>
                 <button
                   onClick={() => playPreviewAudio(ui.finalVideo.bgmTrack, 'bgm')}
-                  className={`w-full rounded-lg border px-3 py-2 text-[11px] font-black transition-all flex items-center justify-center gap-1 ${previewAudioType === 'bgm' && previewAudioPath === ui.finalVideo.bgmTrack ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/10 text-white border-white/30 hover:bg-white/20'}`}
+                  disabled={isOneClickFixed}
+                  className={`w-full rounded-lg border px-3 py-2 text-[11px] font-black transition-all flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${previewAudioType === 'bgm' && previewAudioPath === ui.finalVideo.bgmTrack ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/10 text-white border-white/30 hover:bg-white/20'}`}
                 >
                   <Play className="w-3 h-3" /> {previewAudioType === 'bgm' && previewAudioPath === ui.finalVideo.bgmTrack ? '배경음악 미리듣기 중지' : '배경음악 미리듣기'}
                 </button>
@@ -270,7 +274,8 @@ export default function Panel12Section(props: Props) {
                 <select
                   value={ui.finalVideo.sfxTrack}
                   onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, sfxTrack: e.target.value } }))}
-                  className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
+                  disabled={isOneClickFixed}
+                  className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {SFX_LIBRARY.map(track => (
                     <option key={track.path} value={track.path}>{track.label}</option>
@@ -278,7 +283,8 @@ export default function Panel12Section(props: Props) {
                 </select>
                 <button
                   onClick={() => playPreviewAudio(ui.finalVideo.sfxTrack, 'sfx')}
-                  className={`w-full rounded-lg border px-3 py-2 text-[11px] font-black transition-all flex items-center justify-center gap-1 ${previewAudioType === 'sfx' && previewAudioPath === ui.finalVideo.sfxTrack ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/10 text-white border-white/30 hover:bg-white/20'}`}
+                  disabled={isOneClickFixed}
+                  className={`w-full rounded-lg border px-3 py-2 text-[11px] font-black transition-all flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${previewAudioType === 'sfx' && previewAudioPath === ui.finalVideo.sfxTrack ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/10 text-white border-white/30 hover:bg-white/20'}`}
                 >
                   <Play className="w-3 h-3" /> {previewAudioType === 'sfx' && previewAudioPath === ui.finalVideo.sfxTrack ? '효과음 미리듣기 중지' : '효과음 미리듣기'}
                 </button>
