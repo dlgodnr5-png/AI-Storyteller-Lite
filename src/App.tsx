@@ -6917,9 +6917,9 @@ ${JSON.stringify(cutPayload)}`,
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <label className="text-xs font-black text-slate-500 uppercase tracking-widest">영상 배속 설정</label>
-                    <div className="flex gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       {['1.0', '1.25', '1.5', '2.0'].map(speed => (
-                        <button key={speed} className="flex-1 py-2 bg-white/5 border border-white/10 rounded-xl text-xs font-bold hover:bg-white/10 transition-all">
+                        <button key={speed} className="py-2 bg-white/5 border border-white/10 rounded-xl text-xs font-bold hover:bg-white/10 transition-all">
                           {speed}x
                         </button>
                       ))}

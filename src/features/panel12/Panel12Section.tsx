@@ -223,16 +223,16 @@ export default function Panel12Section(props: Props) {
 
   return (
     <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl">
-      <div className="flex items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 min-w-0">
           <h3 className="text-xl font-black text-emerald-400">12. 최종 영상생성</h3>
-          <p className="text-[11px] text-emerald-100/95 bg-emerald-500/15 border border-emerald-300/25 rounded-lg px-3 py-1.5 truncate">
+          <p className="text-[11px] text-emerald-100/95 bg-emerald-500/15 border border-emerald-300/25 rounded-lg px-3 py-1.5 sm:truncate">
             최적 순서: 이미지 준비 → 훅 영상 업로드 → 훅 컷 수 지정 → 슬라이드 구성 → 렌더링/MP4
           </p>
         </div>
         <button
           onClick={() => setUi((prev: any) => ({ ...prev, panelsOpen: { ...prev.panelsOpen, p12: !prev.panelsOpen.p12 } }))}
-          className="text-xs font-bold bg-white/10 px-3 py-1 rounded-lg hover:bg-white/20 transition-all"
+          className="text-xs font-bold bg-white/10 px-3 py-1 rounded-lg hover:bg-white/20 transition-all w-full sm:w-auto"
         >
           {ui.panelsOpen.p12 ? '숨기기' : '보이기'}
         </button>
@@ -891,7 +891,7 @@ export default function Panel12Section(props: Props) {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button
                   onClick={handleGenerateFinalVideo}
                   disabled={ui.finalVideo.generating || ui.imageJobs.filter((j: any) => j.imageUrl).length === 0}
@@ -969,7 +969,7 @@ export default function Panel12Section(props: Props) {
               </div>
 
               {ui.finalVideo.type === 'image_slide' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <button
                     onClick={handleDownloadSrt}
                     disabled={ui.finalVideo.slides.length === 0 || !canDownload}
