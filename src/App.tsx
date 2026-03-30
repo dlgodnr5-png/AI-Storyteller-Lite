@@ -21,7 +21,15 @@ import ApiStatusBar from './components/ApiStatusBar';
 const GEMINI_TTS_MODELS = [
   { id: 'gemini-2.5-flash-preview-tts', label: 'Gemini 2.5 Flash Preview TTS', price: '1M/$7.88' },
   { id: 'gemini-2.5-pro-preview-tts', label: 'Gemini 2.5 Pro Preview TTS', price: '1M/$15.75' },
+  { id: 'elevenlabs', label: 'ElevenLabs TTS', price: 'ElevenLabs 요금제' },
 ];
+
+const ELEVENLABS_MODELS = [
+  { id: 'eleven_multilingual_v2', label: 'Eleven Multilingual v2' },
+  { id: 'eleven_turbo_v2', label: 'Eleven Turbo v2' },
+];
+
+const GEMINI_TTS_ONLY_MODELS = GEMINI_TTS_MODELS.filter(model => model.id !== 'elevenlabs');
 
 const GEMINI_TTS_VOICES = [
   { id: "Kore", label: "Kore · 여성 · 따뜻/밝음", gender: "여성", tags: ["따뜻", "밝음", "진행"] },
@@ -87,6 +95,35 @@ const VOICE_SAMPLE_PATHS: Record<string, string> = {
   Umbriel: '/audio/umbriel.wav',
   Vindemiatrix: '/audio/vindemiatrix.wav',
   Zubenelgenubi: '/audio/zubenelgenubi.wav',
+};
+
+const ELEVENLABS_VOICES = [
+  { id: 'elv_adam', name: 'Adam', label: 'Adam · Dominant · 남성', preview: '/audio/elevenlabs-previews/Adam - Dominant_남성.mp3' },
+  { id: 'elv_alice', name: 'Alice', label: 'Alice · Clear · 여성 · 정보', preview: '/audio/elevenlabs-previews/Alice - Clear_여성_정보.mp3' },
+  { id: 'elv_bill', name: 'Bill', label: 'Bill · Wise · 남성 · 상품', preview: '/audio/elevenlabs-previews/Bill - Wise_남성_상품.mp3' },
+  { id: 'elv_brian', name: 'Brian', label: 'Brian · Deep · 남성 · 심리', preview: '/audio/elevenlabs-previews/Brian_Deep_남성_심리.mp3' },
+  { id: 'elv_callum', name: 'Callum', label: 'Callum · Husky · 남성', preview: '/audio/elevenlabs-previews/Callum - Husky_남성.mp3' },
+  { id: 'elv_charlie', name: 'Charlie', label: 'Charlie · Deep/Confident · 남성 · 정보', preview: '/audio/elevenlabs-previews/Charlie - Deep, Confident_남성_정보.mp3' },
+  { id: 'elv_chris', name: 'Chris', label: 'Chris · Charming · 남성 · 소탈', preview: '/audio/elevenlabs-previews/Chris - Charming_남성_소탈.mp3' },
+  { id: 'elv_daniel', name: 'Daniel', label: 'Daniel · Broadcaster · 남성 · 방송', preview: '/audio/elevenlabs-previews/Daniel - Steady Broadcaster_남성_방송.mp3' },
+  { id: 'elv_george', name: 'George', label: 'George · Warm · 남성 · 온화', preview: '/audio/elevenlabs-previews/George - Warm, Captivating_남성_온화.mp3' },
+  { id: 'elv_harry', name: 'Harry', label: 'Harry · Fierce · 남성 · 코믹', preview: '/audio/elevenlabs-previews/Harry - Fierce Warrior_남성_코믹.mp3' },
+  { id: 'elv_liam', name: 'Liam', label: 'Liam · Energetic · 남성 · 이야기', preview: '/audio/elevenlabs-previews/Liam - Energetic_남성_이야기.mp3' },
+  { id: 'elv_lily', name: 'Lily', label: 'Lily · Velvety · 여성', preview: '/audio/elevenlabs-previews/Lily - Velvety Actress_여성.mp3' },
+  { id: 'elv_matilda', name: 'Matilda', label: 'Matilda · Knowledgable · 여성 · 상품', preview: '/audio/elevenlabs-previews/Matilda - Knowledgable_여성_상품.mp3' },
+  { id: 'elv_sarah', name: 'Sarah', label: 'Sarah · Mature · 여성 · 시니어', preview: '/audio/elevenlabs-previews/Sarah - Mature, Reassuring_여성_시니어.mp3' },
+];
+
+const ELEVENLABS_PREVIEW_PATHS = ELEVENLABS_VOICES.reduce<Record<string, string>>((acc, voice) => {
+  acc[voice.id] = voice.preview;
+  return acc;
+}, {});
+
+const ELEVENLABS_DEFAULT_SETTINGS = {
+  stability: 0.45,
+  similarity_boost: 0.75,
+  style: 0.2,
+  use_speaker_boost: true,
 };
 
 const BGM_LIBRARY: Array<{ label: string; path: string }> = [
@@ -1018,56 +1055,23 @@ const drawSubtitleOverlay = (
   gridPosition?: number,
   options?: {
     preset: SubtitlePreset;
-    highlightWord?: string;
-    highlightKeywords?: Set<string>;
     progress?: number;
     entryAnimation?: SubtitleEntryAnimation;
-    highlightStrength?: SubtitleHighlightStrength;
   },
 ) => {
   const rendered = lines.filter(Boolean).slice(0, 2);
   if (rendered.length === 0) return;
 
   const preset = SUBTITLE_PRESETS[options?.preset || 'shorts'];
-  const highlightWord = options?.highlightWord?.trim();
-  const keywordSet = options?.highlightKeywords;
   const progress = Math.max(0, Math.min(1, options?.progress ?? 1));
   const entryAnimation = options?.entryAnimation || 'none';
-  const highlightStrength = options?.highlightStrength || 'medium';
 
   const drawLine = (line: string, y: number) => {
-    if (!highlightWord) {
-      ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.12));
-      ctx.strokeStyle = preset.strokeColor;
-      ctx.strokeText(line, width / 2, y);
-      ctx.fillStyle = preset.textColor;
-      ctx.fillText(line, width / 2, y);
-      return;
-    }
-
-    const parts = line.split(/(\s+)/);
-    const widths = parts.map(part => ctx.measureText(part).width);
-    const totalWidth = widths.reduce((sum, w) => sum + w, 0);
-    let x = width / 2 - totalWidth / 2;
-
-    parts.forEach((part, idx) => {
-      if (!part) return;
-      const isSpace = /^\s+$/.test(part);
-      const token = cleanWordToken(part);
-      const isHighlightByProgress = highlightStrength !== 'low' && Boolean(highlightWord) && token === cleanWordToken(highlightWord);
-      const keywordMatch = Boolean(keywordSet && token && keywordSet.has(token));
-      const fuzzyKeywordMatch = highlightStrength === 'high' && Boolean(keywordSet && token && [...keywordSet].some(k => token.startsWith(k) || k.startsWith(token)));
-      const isHighlightByKeyword = keywordMatch || fuzzyKeywordMatch;
-      const isHighlight = !isSpace && (isHighlightByProgress || isHighlightByKeyword);
-      ctx.textAlign = 'left';
-      ctx.lineWidth = Math.max(2, Math.round(fontSize * (highlightStrength === 'high' ? 0.14 : 0.12)));
-      ctx.strokeStyle = preset.strokeColor;
-      ctx.strokeText(part, x, y);
-      ctx.fillStyle = isHighlight ? preset.accentColor : preset.textColor;
-      ctx.fillText(part, x, y);
-      x += widths[idx];
-    });
-    ctx.textAlign = 'center';
+    ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.12));
+    ctx.strokeStyle = preset.strokeColor;
+    ctx.strokeText(line, width / 2, y);
+    ctx.fillStyle = preset.textColor;
+    ctx.fillText(line, width / 2, y);
   };
 
   const fontSize = Math.round(Math.min(width, height) * preset.fontScale);
@@ -1471,7 +1475,7 @@ const InlineSmoothRange = React.memo(({
 
 export default function App() {
   // --- State ---
-  const [keys, setKeys] = useState({ yt1: '', yt2: '', g1: '' });
+  const [keys, setKeys] = useState({ yt1: '', yt2: '', g1: '', e11: '' });
   const [activeKeys, setActiveKeys] = useState({ yt: 'yt1', g: 'g1' });
   const [keyStatus, setKeyStatus] = useState<Record<string, any>>({});
   
@@ -1528,6 +1532,8 @@ export default function App() {
       status: '',
       voice: 'Kore',
       model: 'gemini-2.5-flash-preview-tts',
+      elevenlabsVoice: 'elv_adam',
+      elevenlabsModel: 'eleven_multilingual_v2',
       selectedToneId: 'default',
       styleInstructions: '',
     },
@@ -1553,9 +1559,9 @@ export default function App() {
       subtitlePosition: 'bottom' as SubtitlePosition,
       subtitleGridPosition: 9,
       subtitlePreset: 'shorts' as SubtitlePreset,
-      subtitleWordHighlight: true,
-      subtitleHighlightStrength: 'medium' as SubtitleHighlightStrength,
-      subtitleKeywords: '핵심,충격,비밀,방법,중요',
+      subtitleWordHighlight: false,
+      subtitleHighlightStrength: 'low' as SubtitleHighlightStrength,
+      subtitleKeywords: '',
       subtitleUsePerCutKeywords: false,
       subtitleKeywordsByCut: {} as Record<number, string>,
       subtitleEntryAnimation: 'fade' as SubtitleEntryAnimation,
@@ -1684,6 +1690,7 @@ export default function App() {
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const abortRef = useRef<boolean>(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
+  const elevenlabsVoiceMapRef = useRef<Record<string, string> | null>(null);
   const taskAbortRef = useRef({
     hooks: false,
     thumbnail: false,
@@ -1740,13 +1747,15 @@ export default function App() {
   }, [ui.publishing.approvedEmails, effectiveAdminEmails]);
   const isApprovedUser = Boolean(currentUserEmail && effectiveApprovedEmails.includes(currentUserEmail));
   const hasGeminiKey = Boolean((keys.g1 || '').trim());
+  const hasElevenLabsKey = Boolean((keys.e11 || '').trim());
   const hasYouTubeApiKey = Boolean((keys[activeKeys.yt as keyof typeof keys] || '').trim());
   const apiStatusItems = useMemo(() => ([
     { key: 'google', label: 'Google 로그인', on: hasValidYouTubeAuth, colorOn: 'bg-cyan-400' },
     { key: 'gemini', label: 'Gemini API', on: hasGeminiKey, colorOn: 'bg-blue-400' },
+    { key: 'elevenlabs', label: 'ElevenLabs API', on: hasElevenLabsKey, colorOn: 'bg-indigo-400' },
     { key: 'youtube', label: 'YouTube API', on: hasYouTubeApiKey, colorOn: 'bg-red-400' },
     { key: 'approved', label: '승인 권한', on: isApprovedUser, colorOn: 'bg-emerald-400' },
-  ]), [hasValidYouTubeAuth, hasGeminiKey, hasYouTubeApiKey, isApprovedUser]);
+  ]), [hasValidYouTubeAuth, hasGeminiKey, hasElevenLabsKey, hasYouTubeApiKey, isApprovedUser]);
   const scriptMetrics = useMemo(
     () => buildScriptMetrics(ui.script.output || '', (['KR', 'EN', 'JP'].includes(ui.script.lang) ? ui.script.lang : 'KR') as 'KR' | 'EN' | 'JP'),
     [ui.script.output, ui.script.lang],
@@ -2485,11 +2494,15 @@ ${ui.selectedHookTitle}
     setPreviewLoading(true);
     
     try {
-      const localAudioCandidates = [
-        VOICE_SAMPLE_PATHS[voiceId],
-        `/audio/${voiceId}.wav`,
-        `/audio/${voiceId.toLowerCase()}.wav`,
-      ].filter(Boolean) as string[];
+      const isElevenLabsVoice = Boolean(ELEVENLABS_PREVIEW_PATHS[voiceId]);
+      const localAudioCandidates = (isElevenLabsVoice
+        ? [ELEVENLABS_PREVIEW_PATHS[voiceId]]
+        : [
+            VOICE_SAMPLE_PATHS[voiceId],
+            `/audio/${voiceId}.wav`,
+            `/audio/${voiceId.toLowerCase()}.wav`,
+          ])
+        .filter(Boolean) as string[];
       let resolvedAudioUrl = '';
 
       try {
@@ -2497,7 +2510,8 @@ ${ui.selectedHookTitle}
           const localSample = await fetch(candidate);
           if (localSample.ok) {
             const localBuffer = await localSample.arrayBuffer();
-            resolvedAudioUrl = URL.createObjectURL(new Blob([localBuffer], { type: 'audio/wav' }));
+            const isMp3 = candidate.toLowerCase().endsWith('.mp3');
+            resolvedAudioUrl = URL.createObjectURL(new Blob([localBuffer], { type: isMp3 ? 'audio/mpeg' : 'audio/wav' }));
             break;
           }
         }
@@ -2505,6 +2519,9 @@ ${ui.selectedHookTitle}
           throw new Error('Local sample not found');
         }
       } catch {
+        if (isElevenLabsVoice) {
+          throw new Error('ElevenLabs 미리듣기 샘플 파일을 찾지 못했습니다. /public/audio/elevenlabs-previews 경로를 확인해 주세요.');
+        }
         if (!keys.g1) {
           throw new Error('로컬 샘플이 없고 Gemini API 키도 없습니다. API 설정에서 Gemini 키를 등록하면 자동 미리듣기가 가능합니다.');
         }
@@ -2651,7 +2668,49 @@ ${ui.selectedHookTitle}
     };
   }, [ui.tts.audioUrl]);
 
-  const handleGenerateTTS = async () => {
+  const buildCleanTtsScript = (raw: string) => raw
+    .replace(/^[a-zA-Z\s]+:\s*/gm, '')
+    .replace(/\(.*\)/g, '')
+    .trim();
+
+  const loadElevenLabsVoiceMap = async (apiKey: string) => {
+    const res = await fetch('https://api.elevenlabs.io/v1/voices', {
+      headers: {
+        'xi-api-key': apiKey,
+      },
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`ElevenLabs 보이스 목록 조회 실패 (${res.status}) ${detail}`.trim());
+    }
+    const data = await res.json();
+    const map: Record<string, string> = {};
+    for (const voice of data?.voices || []) {
+      if (voice?.name) map[String(voice.name).toLowerCase()] = voice.voice_id;
+      if (voice?.voice_id) map[String(voice.voice_id).toLowerCase()] = voice.voice_id;
+    }
+    elevenlabsVoiceMapRef.current = map;
+    return map;
+  };
+
+  const resolveElevenLabsVoiceId = async (apiKey: string, voiceKey: string) => {
+    const map = elevenlabsVoiceMapRef.current || await loadElevenLabsVoiceMap(apiKey);
+    const voiceEntry = ELEVENLABS_VOICES.find(voice => voice.id === voiceKey);
+    const lookupKeys = [
+      voiceEntry?.name,
+      voiceEntry?.label?.split(' · ')[0],
+      voiceKey,
+    ]
+      .filter(Boolean)
+      .map(key => String(key).toLowerCase());
+    for (const key of lookupKeys) {
+      const mapped = map[key];
+      if (mapped) return mapped;
+    }
+    throw new Error('ElevenLabs 보이스 ID를 찾지 못했습니다. API 설정 또는 보이스 이름을 확인해 주세요.');
+  };
+
+  const handleGenerateGeminiTTS = async () => {
     if (ui.tts.generating) {
       taskAbortRef.current.tts = true;
       setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, status: '중지됨' } }));
@@ -2664,11 +2723,7 @@ ${ui.selectedHookTitle}
     try {
       const ai = new GoogleGenAI({ apiKey: keys.g1 });
       
-      // Clean script for TTS (remove labels like "Narrator:", "Speaker:", etc.)
-      const cleanScript = ui.script.output
-        .replace(/^[a-zA-Z\s]+:\s*/gm, '') // Remove "Label: " at start of lines
-        .replace(/\(.*\)/g, '') // Remove text in parentheses (stage directions)
-        .trim();
+      const cleanScript = buildCleanTtsScript(ui.script.output);
 
       const promptText = ui.tts.styleInstructions 
         ? `[Style: ${ui.tts.styleInstructions}]\n${cleanScript}`
@@ -2700,6 +2755,60 @@ ${ui.selectedHookTitle}
       console.error(err);
       setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, status: '실패' } }));
     }
+  };
+
+  const handleGenerateElevenLabsTTS = async () => {
+    if (ui.tts.generating) {
+      taskAbortRef.current.tts = true;
+      setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, status: '중지됨' } }));
+      return;
+    }
+    if (!keys.e11 || !ui.script.output) return alert('대본을 먼저 생성하세요.');
+    taskAbortRef.current.tts = false;
+    setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: true, status: '생성 중...' } }));
+
+    try {
+      const cleanScript = buildCleanTtsScript(ui.script.output);
+      const resolvedVoiceId = await resolveElevenLabsVoiceId(keys.e11, ui.tts.elevenlabsVoice);
+      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${resolvedVoiceId}`, {
+        method: 'POST',
+        headers: {
+          'xi-api-key': keys.e11,
+          'Content-Type': 'application/json',
+          'Accept': 'audio/mpeg',
+        },
+        body: JSON.stringify({
+          text: cleanScript,
+          model_id: ui.tts.elevenlabsModel || 'eleven_multilingual_v2',
+          voice_settings: ELEVENLABS_DEFAULT_SETTINGS,
+        }),
+      });
+
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        throw new Error(`ElevenLabs TTS 실패 (${response.status}) ${detail}`.trim());
+      }
+
+      if (taskAbortRef.current.tts) {
+        setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, status: '중지됨' } }));
+        return;
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, audioUrl: url, status: '완료' } }));
+    } catch (err) {
+      console.error(err);
+      setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, status: '실패' } }));
+    }
+  };
+
+  const handleGenerateTTS = async (provider?: 'gemini' | 'elevenlabs') => {
+    if (provider === 'elevenlabs') {
+      await handleGenerateElevenLabsTTS();
+      return;
+    }
+    await handleGenerateGeminiTTS();
   };
 
   const splitCuts = async () => {
@@ -4686,16 +4795,8 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
           if (subtitleSegments.length > 0) {
             const subtitle = subtitleSegments.find(s => timelineElapsed >= s.start && timelineElapsed < s.end);
             if (subtitle) {
-              const words = subtitle.text.split(/\s+/).filter(Boolean);
               const segmentDuration = Math.max(0.001, subtitle.end - subtitle.start);
               const segmentProgress = Math.min(0.999, Math.max(0, (timelineElapsed - subtitle.start) / segmentDuration));
-              const highlightWord = ui.finalVideo.subtitleWordHighlight && words.length > 0
-                ? words[Math.min(words.length - 1, Math.floor(segmentProgress * words.length))]
-                : undefined;
-              const keywordSource = ui.finalVideo.subtitleUsePerCutKeywords
-                ? ui.finalVideo.subtitleKeywordsByCut[subtitle.cut] || ''
-                : ui.finalVideo.subtitleKeywords;
-              const subtitleKeywordSet = parseKeywordSet(keywordSource || '');
 
               drawSubtitleOverlay(
                 ctx,
@@ -4706,11 +4807,8 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
                 ui.finalVideo.subtitleGridPosition,
                 {
                   preset: ui.finalVideo.subtitlePreset,
-                  highlightWord,
-                  highlightKeywords: subtitleKeywordSet,
                   progress: segmentProgress,
                   entryAnimation: ui.finalVideo.subtitleEntryAnimation,
-                  highlightStrength: ui.finalVideo.subtitleHighlightStrength,
                 },
               );
             }
@@ -6222,91 +6320,165 @@ ${JSON.stringify(cutPayload)}`,
         <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl">
           <PanelHeader title="8. tts 생성" id="p7" colorClass="text-cyan-400" />
           {ui.panelsOpen.p7 && (
-            <InlineLockedSection
-              locked={!hasGeminiKey}
-              title="Gemini API 키 필요"
-              description="TTS 생성은 Gemini API 키가 필요합니다. API 설정에서 Gemini 키를 입력해 주세요."
-              onOpenSettings={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
-            >
-            <div className="space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="block text-xs font-black text-slate-500 uppercase tracking-widest">TTS 모델 선택</label>
-                    <select 
-                      value={ui.tts.model}
-                      onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, model: e.target.value } }))}
-                      className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer"
-                    >
-                      {GEMINI_TTS_MODELS.map(m => (
-                        <option key={m.id} value={m.id} className="bg-slate-800 text-white">{m.label}</option>
-                      ))}
-                    </select>
-                  </div>
-
+            <div className="space-y-6">
+              <InlineLockedSection
+                locked={!hasGeminiKey}
+                title="Gemini API 키 필요"
+                description="Gemini TTS 생성은 Gemini API 키가 필요합니다. API 설정에서 Gemini 키를 입력해 주세요."
+                onOpenSettings={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
+              >
+                <div className="space-y-6 bg-black/30 border border-white/10 rounded-2xl p-5">
                   <div className="flex items-center justify-between">
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest">TTS 목소리 선택</label>
-                    <button 
-                      onClick={() => handlePreviewVoice(ui.tts.voice)}
-                      className={`text-[10px] font-black px-3 py-1.5 rounded-full transition-all border flex items-center gap-1.5 ${previewingId === ui.tts.voice ? 'bg-cyan-500 text-black border-cyan-500 shadow-[0_0_15px_rgba(6,182,212,0.5)]' : 'bg-white/5 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/10'}`}
-                    >
-                      {previewLoading && previewingId === ui.tts.voice ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : previewingId === ui.tts.voice ? (
-                        <Pause className="w-3 h-3 fill-current" />
-                      ) : (
-                        <Play className="w-3 h-3 fill-current" />
-                      )}
-                      {previewLoading && previewingId === ui.tts.voice ? '로딩 중...' : previewingId === ui.tts.voice ? '정지' : '미리듣기'}
-                    </button>
+                    <div>
+                      <p className="text-[11px] font-black text-cyan-300 uppercase tracking-widest">Gemini TTS</p>
+                      <p className="text-xs text-slate-400">모델/보이스/스타일 조합으로 낭독 생성</p>
+                    </div>
                   </div>
-                  <select 
-                    value={ui.tts.voice}
-                    onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, voice: e.target.value } }))}
-                    className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer"
-                  >
-                    {GEMINI_TTS_VOICES.map(v => (
-                      <option key={v.id} value={v.id} className="bg-slate-800 text-white">{v.label} ({v.gender})</option>
-                    ))}
-                  </select>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="block text-xs font-black text-slate-500 uppercase tracking-widest">TTS 모델 선택</label>
+                        <select 
+                          value={ui.tts.model}
+                          onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, model: e.target.value } }))}
+                          className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer"
+                        >
+                        {GEMINI_TTS_ONLY_MODELS.map(m => (
+                          <option key={m.id} value={m.id} className="bg-slate-800 text-white">{m.label}</option>
+                        ))}
+                        </select>
+                      </div>
 
-                  <div className="space-y-2 pt-2">
-                    <div className="flex items-center justify-between">
-                      <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">낭독 스타일 설정</label>
-                      <button 
-                        onClick={autoSuggestStyle}
-                        className="text-[9px] font-black text-cyan-400 hover:text-cyan-300 transition-colors"
+                      <div className="flex items-center justify-between">
+                        <label className="block text-xs font-black text-slate-400 uppercase tracking-widest">TTS 목소리 선택</label>
+                        <button 
+                          onClick={() => handlePreviewVoice(ui.tts.voice)}
+                          className={`text-[10px] font-black px-3 py-1.5 rounded-full transition-all border flex items-center gap-1.5 ${previewingId === ui.tts.voice ? 'bg-cyan-500 text-black border-cyan-500 shadow-[0_0_15px_rgba(6,182,212,0.5)]' : 'bg-white/5 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/10'}`}
+                        >
+                          {previewLoading && previewingId === ui.tts.voice ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : previewingId === ui.tts.voice ? (
+                            <Pause className="w-3 h-3 fill-current" />
+                          ) : (
+                            <Play className="w-3 h-3 fill-current" />
+                          )}
+                          {previewLoading && previewingId === ui.tts.voice ? '로딩 중...' : previewingId === ui.tts.voice ? '정지' : '미리듣기'}
+                        </button>
+                      </div>
+                      <select 
+                        value={ui.tts.voice}
+                        onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, voice: e.target.value } }))}
+                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer"
                       >
-                        AI 추천
+                        {GEMINI_TTS_VOICES.map(v => (
+                          <option key={v.id} value={v.id} className="bg-slate-800 text-white">{v.label} ({v.gender})</option>
+                        ))}
+                      </select>
+
+                      <div className="space-y-2 pt-2">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">낭독 스타일 설정</label>
+                          <button 
+                            onClick={autoSuggestStyle}
+                            className="text-[9px] font-black text-cyan-400 hover:text-cyan-300 transition-colors"
+                          >
+                            AI 추천
+                          </button>
+                        </div>
+                        <select 
+                          value={ui.tts.selectedToneId}
+                          onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, selectedToneId: e.target.value } }))}
+                          className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none focus:ring-2 ring-cyan-500/50 cursor-pointer appearance-none"
+                        >
+                          {TONE_STYLES.map(s => (
+                            <option key={s.id} value={s.id} className="bg-slate-800 text-white">{s.label}</option>
+                          ))}
+                        </select>
+                        <textarea 
+                          value={ui.tts.styleInstructions}
+                          onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, styleInstructions: e.target.value } }))}
+                          placeholder="AI에게 전달할 낭독 스타일 지침..."
+                          className="w-full bg-slate-800 border border-white/10 rounded-lg p-3 text-[10px] text-slate-300 outline-none h-16 resize-none focus:ring-2 ring-cyan-500/50"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex flex-col justify-end gap-3">
+                      <button 
+                        onClick={handleGenerateGeminiTTS}
+                        disabled={!ui.script.output}
+                        className={`w-full text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${ui.tts.generating ? 'running-gradient' : 'bg-cyan-500 hover:bg-cyan-600'}`}
+                      >
+                        {ui.tts.generating ? <><Loader2 className="w-5 h-5 animate-spin" /> 중지</> : <><Volume2 className="w-5 h-5" /> Gemini TTS 생성</>}
                       </button>
                     </div>
-                    <select 
-                      value={ui.tts.selectedToneId}
-                      onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, selectedToneId: e.target.value } }))}
-                      className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none focus:ring-2 ring-cyan-500/50 cursor-pointer appearance-none"
-                    >
-                      {TONE_STYLES.map(s => (
-                        <option key={s.id} value={s.id} className="bg-slate-800 text-white">{s.label}</option>
-                      ))}
-                    </select>
-                    <textarea 
-                      value={ui.tts.styleInstructions}
-                      onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, styleInstructions: e.target.value } }))}
-                      placeholder="AI에게 전달할 낭독 스타일 지침..."
-                      className="w-full bg-slate-800 border border-white/10 rounded-lg p-3 text-[10px] text-slate-300 outline-none h-16 resize-none focus:ring-2 ring-cyan-500/50"
-                    />
                   </div>
                 </div>
-                <div className="flex flex-col justify-end gap-3">
-                  <button 
-                    onClick={handleGenerateTTS}
-                    disabled={!ui.script.output}
-                    className={`w-full text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${ui.tts.generating ? 'running-gradient' : 'bg-cyan-500 hover:bg-cyan-600'}`}
-                  >
-                    {ui.tts.generating ? <><Loader2 className="w-5 h-5 animate-spin" /> 중지</> : <><Volume2 className="w-5 h-5" /> TTS 생성</>}
-                  </button>
+              </InlineLockedSection>
+
+              <InlineLockedSection
+                locked={!hasElevenLabsKey}
+                title="ElevenLabs API 키 필요"
+                description="ElevenLabs TTS 생성은 ElevenLabs API 키가 필요합니다. API 설정에서 키를 입력해 주세요."
+                onOpenSettings={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
+              >
+                <div className="space-y-6 bg-black/30 border border-white/10 rounded-2xl p-5">
+                  <div>
+                    <p className="text-[11px] font-black text-indigo-300 uppercase tracking-widest">ElevenLabs TTS</p>
+                    <p className="text-xs text-slate-400">로컬 미리듣기 + ElevenLabs API 생성</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="block text-xs font-black text-slate-500 uppercase tracking-widest">TTS 모델 선택</label>
+                        <select
+                          value={ui.tts.elevenlabsModel}
+                          onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, elevenlabsModel: e.target.value } }))}
+                          className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-indigo-500/50 appearance-none cursor-pointer"
+                        >
+                          {ELEVENLABS_MODELS.map(model => (
+                            <option key={model.id} value={model.id} className="bg-slate-800 text-white">{model.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <label className="block text-xs font-black text-slate-400 uppercase tracking-widest">TTS 목소리 선택</label>
+                        <button 
+                          onClick={() => handlePreviewVoice(ui.tts.elevenlabsVoice)}
+                          className={`text-[10px] font-black px-3 py-1.5 rounded-full transition-all border flex items-center gap-1.5 ${previewingId === ui.tts.elevenlabsVoice ? 'bg-indigo-500 text-black border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)]' : 'bg-white/5 text-indigo-300 border-indigo-500/30 hover:bg-indigo-500/10'}`}
+                        >
+                          {previewLoading && previewingId === ui.tts.elevenlabsVoice ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : previewingId === ui.tts.elevenlabsVoice ? (
+                            <Pause className="w-3 h-3 fill-current" />
+                          ) : (
+                            <Play className="w-3 h-3 fill-current" />
+                          )}
+                          {previewLoading && previewingId === ui.tts.elevenlabsVoice ? '로딩 중...' : previewingId === ui.tts.elevenlabsVoice ? '정지' : '미리듣기'}
+                        </button>
+                      </div>
+                      <select
+                        value={ui.tts.elevenlabsVoice}
+                        onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, elevenlabsVoice: e.target.value } }))}
+                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-indigo-500/50 appearance-none cursor-pointer"
+                      >
+                        {ELEVENLABS_VOICES.map(voice => (
+                          <option key={voice.id} value={voice.id} className="bg-slate-800 text-white">{voice.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex flex-col justify-end gap-3">
+                      <button
+                        onClick={handleGenerateElevenLabsTTS}
+                        disabled={!ui.script.output}
+                        className={`w-full text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${ui.tts.generating ? 'running-gradient' : 'bg-indigo-500 hover:bg-indigo-600'}`}
+                      >
+                        {ui.tts.generating ? <><Loader2 className="w-5 h-5 animate-spin" /> 중지</> : <><Volume2 className="w-5 h-5" /> ElevenLabs TTS 생성</>}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              </InlineLockedSection>
 
               {ui.tts.audioUrl && (
                 <div className="bg-cyan-500/5 border border-cyan-500/20 p-4 rounded-2xl flex items-center gap-4">
@@ -6315,7 +6487,6 @@ ${JSON.stringify(cutPayload)}`,
                 </div>
               )}
             </div>
-            </InlineLockedSection>
           )}
         </section>
 
@@ -6504,15 +6675,15 @@ ${JSON.stringify(cutPayload)}`,
               onOpenSettings={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
             >
             <div className="space-y-6">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <p className="text-xs text-slate-400 max-w-md">컷을 클릭하면 대기열에 추가되며 순차적으로 이미지가 자동 생성됩니다. (안정성을 위해 컷당 20~25초 간격)</p>
-                <p className="text-[11px] text-violet-200/90 bg-violet-500/10 border border-violet-300/20 rounded-xl px-3 py-2">혼합 렌더 권장: 11번에서 초반 훅 컷 영상 업로드 → 12번에서 슬라이드 구성 → 렌더링</p>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <p className="text-xs text-slate-400 lg:max-w-md">컷을 클릭하면 대기열에 추가되며 순차적으로 이미지가 자동 생성됩니다. (안정성을 위해 컷당 20~25초 간격)</p>
+                <p className="text-[11px] text-violet-200/90 bg-violet-500/10 border border-violet-300/20 rounded-xl px-3 py-2 w-full lg:w-auto">혼합 렌더 권장: 11번에서 초반 훅 컷 영상 업로드 → 12번에서 슬라이드 구성 → 렌더링</p>
                 
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 w-full lg:w-auto">
                   <select 
                     value={ui.thumbnail.model}
                     onChange={(e) => setUi(prev => ({ ...prev, thumbnail: { ...prev.thumbnail, model: e.target.value as any } }))}
-                    className="bg-slate-800 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer"
+                    className="w-full sm:w-auto bg-slate-800 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer"
                   >
                     <option value="gemini-3.1-flash-image-preview">Auto_Gemini-3.1-flash-image-preview ($0.0672)</option>
                     <option value="gemini-3-pro-image-preview">Auto_Gemini-3-pro-image-preview</option>
@@ -6529,19 +6700,19 @@ ${JSON.stringify(cutPayload)}`,
                         alert('이미지 전체 생성이 완료되었습니다.');
                       }
                     }}
-                    className={`text-white font-black px-4 py-6 rounded-xl transition-all text-xs vertical-text flex items-center justify-center ${autoImageBatchRunning ? 'running-gradient' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                    className={`w-full sm:w-auto text-white font-black px-4 py-3 sm:py-4 md:py-6 rounded-xl transition-all text-xs whitespace-nowrap flex items-center justify-center ${autoImageBatchRunning ? 'running-gradient' : 'bg-indigo-600 hover:bg-indigo-700'}`}
                   >
                     {autoImageBatchRunning ? '중지' : '전체 자동 생성'}
                   </button>
 
                   <button 
                     onClick={() => { abortRef.current = true; }}
-                    className="bg-rose-500 hover:bg-rose-600 text-white font-black px-4 py-4 rounded-xl transition-all text-xs"
+                    className="w-full sm:w-auto bg-rose-500 hover:bg-rose-600 text-white font-black px-4 py-3 sm:py-4 rounded-xl transition-all text-xs whitespace-nowrap"
                   >
                     중지
                   </button>
 
-                  <button className="bg-white/5 border border-dashed border-white/20 text-slate-400 px-4 py-4 rounded-xl hover:bg-white/10 transition-all text-xs">
+                  <button className="w-full sm:w-auto bg-white/5 border border-dashed border-white/20 text-slate-400 px-4 py-3 sm:py-4 rounded-xl hover:bg-white/10 transition-all text-xs whitespace-nowrap">
                     + 컷 추가
                   </button>
                 </div>
@@ -7261,6 +7432,16 @@ ${JSON.stringify(cutPayload)}`,
                     value={keys.g1}
                     onChange={(e) => setKeys(prev => ({ ...prev, g1: e.target.value }))}
                     placeholder="AIza..."
+                    className="w-full bg-black/40 border border-white/10 rounded-2xl py-4 px-5 text-white outline-none focus:ring-2 ring-amber-500/50"
+                  />
+                </div>
+                <div className="space-y-4">
+                  <label className="block text-sm font-bold text-slate-400 uppercase tracking-widest">ElevenLabs API Key</label>
+                  <input
+                    type="password"
+                    value={keys.e11}
+                    onChange={(e) => setKeys(prev => ({ ...prev, e11: e.target.value }))}
+                    placeholder="sk_..."
                     className="w-full bg-black/40 border border-white/10 rounded-2xl py-4 px-5 text-white outline-none focus:ring-2 ring-amber-500/50"
                   />
                 </div>

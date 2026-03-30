@@ -776,9 +776,6 @@ export default function Panel12Section(props: Props) {
                                       <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-400/20 text-emerald-200 border border-emerald-300/25">
                                         {template.subtitlePreset}
                                       </span>
-                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-200 border border-white/10">
-                                        {template.subtitleHighlightStrength}
-                                      </span>
                                     </span>
                                     <span className="text-[9px] text-slate-400 font-medium">
                                       {PRESET_SAMPLE_TEXT[template.subtitlePreset]}
@@ -842,81 +839,7 @@ export default function Panel12Section(props: Props) {
                           ))}
                         </select>
                       </div>
-                      <div className="flex items-center justify-between gap-3 pt-1">
-                        <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">단어 하이라이트</label>
-                        <button
-                          onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitleWordHighlight: !prev.finalVideo.subtitleWordHighlight } }))}
-                          className={`px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.subtitleWordHighlight ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
-                        >
-                          {ui.finalVideo.subtitleWordHighlight ? 'ON' : 'OFF'}
-                        </button>
-                      </div>
-                      <div className="flex items-center justify-between gap-3 pt-1">
-                        <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">강조 강도</label>
-                        <select
-                          value={ui.finalVideo.subtitleHighlightStrength}
-                          onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitleHighlightStrength: e.target.value as any } }))}
-                          className="bg-slate-800 border border-white/10 rounded-lg px-3 py-1.5 text-[10px] text-white outline-none"
-                        >
-                          <option value="low">약</option>
-                          <option value="medium">중</option>
-                          <option value="high">강</option>
-                        </select>
-                      </div>
-                      <div className="space-y-1 pt-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest block">키워드 강조 (쉼표 구분)</label>
-                          <button
-                            onClick={handleSuggestSubtitleKeywords}
-                            disabled={ui.finalVideo.subtitleSuggesting}
-                            className="text-[9px] px-2 py-1 rounded-md bg-emerald-400/20 text-emerald-100 border border-emerald-300/30 font-black disabled:opacity-50"
-                          >
-                            {ui.finalVideo.subtitleSuggesting ? '추출 중...' : 'AI 추천'}
-                          </button>
-                        </div>
-                        <input
-                          value={ui.finalVideo.subtitleKeywords}
-                          onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitleKeywords: e.target.value } }))}
-                          placeholder="핵심, 충격, 비밀"
-                          className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-3 pt-1">
-                        <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">컷별 키워드 사용</label>
-                        <button
-                          onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitleUsePerCutKeywords: !prev.finalVideo.subtitleUsePerCutKeywords } }))}
-                          className={`px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.subtitleUsePerCutKeywords ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-black/30 text-slate-300 border-white/15'}`}
-                        >
-                          {ui.finalVideo.subtitleUsePerCutKeywords ? 'ON' : 'OFF'}
-                        </button>
-                      </div>
-                      {ui.finalVideo.subtitleUsePerCutKeywords && ui.finalVideo.slides.length > 0 && (
-                        <div className="space-y-2 bg-black/30 border border-white/10 rounded-xl p-3 max-h-40 overflow-y-auto custom-scrollbar">
-                          {ui.finalVideo.slides.map((slide: any) => (
-                            <div key={`kw-${slide.cut}`} className="flex items-center gap-2">
-                              <span className="w-12 text-[10px] font-black text-emerald-200">CUT {slide.cut}</span>
-                              <input
-                                value={ui.finalVideo.subtitleKeywordsByCut[slide.cut] || ''}
-                                onChange={(e) => {
-                                  const value = e.target.value;
-                                  setUi((prev: any) => ({
-                                    ...prev,
-                                    finalVideo: {
-                                      ...prev.finalVideo,
-                                      subtitleKeywordsByCut: {
-                                        ...prev.finalVideo.subtitleKeywordsByCut,
-                                        [slide.cut]: value,
-                                      },
-                                    },
-                                  }));
-                                }}
-                                placeholder="컷 전용 키워드"
-                                className="flex-1 bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] text-white outline-none"
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                      <p className="text-[10px] text-slate-400">단어 하이라이트/키워드 강조 기능은 혼란을 줄이기 위해 비활성화되었습니다.</p>
                       <div className="flex items-center justify-between gap-3 pt-1">
                         <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">등장 애니메이션</label>
                         <select
