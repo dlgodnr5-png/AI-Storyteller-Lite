@@ -6207,7 +6207,7 @@ ${JSON.stringify(cutPayload)}`,
                 {/* 화면 비율 선택 */}
                 <div className="space-y-2">
                   <label className="text-xs font-black text-slate-500 uppercase tracking-widest">화면 비율 선택</label>
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {['16:9', '9:16', '1:1', '3:4'].map(ratio => (
                       <button
                         key={ratio}
@@ -6485,9 +6485,9 @@ ${JSON.stringify(cutPayload)}`,
               </InlineLockedSection>
 
               {ui.tts.audioUrl && (
-                <div className="bg-cyan-500/5 border border-cyan-500/20 p-4 rounded-2xl flex items-center gap-4">
-                  <div className="p-3 bg-cyan-500 rounded-xl"><Volume2 className="w-5 h-5 text-black" /></div>
-                  <audio controls src={ui.tts.audioUrl} className="flex-1 h-8" />
+                <div className="bg-cyan-500/5 border border-cyan-500/20 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="p-3 bg-cyan-500 rounded-xl self-start sm:self-auto"><Volume2 className="w-5 h-5 text-black" /></div>
+                  <audio controls src={ui.tts.audioUrl} className="w-full sm:flex-1 h-8" />
                 </div>
               )}
             </div>
@@ -6655,11 +6655,11 @@ ${JSON.stringify(cutPayload)}`,
                 <textarea 
                   readOnly
                   value={ui.cuts.prompts.map(p => p.prompt).join('\n\n')}
-                  className="w-full bg-black/40 border border-white/10 rounded-2xl p-6 text-xs text-slate-300 outline-none h-[300px] custom-scrollbar resize-none"
+                  className="w-full bg-black/40 border border-white/10 rounded-2xl p-6 pb-16 sm:pb-6 text-xs text-slate-300 outline-none h-[300px] custom-scrollbar resize-none"
                 />
                 <button 
                   onClick={() => copyToClipboard(ui.cuts.prompts.map(p => p.prompt).join('\n\n'))}
-                  className="absolute bottom-4 left-4 bg-amber-500 hover:bg-amber-600 text-black font-black px-6 py-2 rounded-xl transition-all text-xs"
+                  className="mt-3 w-full sm:w-auto sm:absolute sm:bottom-4 sm:left-4 bg-amber-500 hover:bg-amber-600 text-black font-black px-6 py-2 rounded-xl transition-all text-xs"
                 >
                   프롬프트 복사
                 </button>
