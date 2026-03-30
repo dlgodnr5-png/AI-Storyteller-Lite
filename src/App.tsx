@@ -6167,7 +6167,7 @@ ${JSON.stringify(cutPayload)}`,
                   </button>
                 ))}
               </div>
-              <div className="bg-amber-400/10 border border-amber-400/20 p-4 rounded-2xl flex items-center justify-between">
+              <div className="bg-amber-400/10 border border-amber-400/20 p-4 rounded-2xl flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-amber-400 flex items-center justify-center text-black font-black text-xs">
                     {ui.videoStyle.selected.split('.')[0]}
@@ -6177,7 +6177,7 @@ ${JSON.stringify(cutPayload)}`,
                     <p className="text-sm font-bold text-white">{ui.videoStyle.selected}</p>
                   </div>
                 </div>
-                <div className="text-[10px] text-slate-500 font-medium italic max-w-[50%] text-right">
+                <div className="text-[10px] text-slate-500 font-medium italic max-w-full text-left sm:max-w-[50%] sm:text-right">
                   {VIDEO_STYLES_31.find(s => ui.videoStyle.selected.startsWith(s.id))?.prompt}
                 </div>
               </div>
