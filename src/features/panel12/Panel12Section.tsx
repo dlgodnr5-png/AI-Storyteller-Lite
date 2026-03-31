@@ -137,17 +137,7 @@ const InlineSmoothRange = React.memo(({
   className?: string;
   disabled?: boolean;
 }) => {
-  const ref = React.useRef<HTMLInputElement | null>(null);
   const rafRef = React.useRef<number>(0);
-  const draggingRef = React.useRef(false);
-
-  React.useEffect(() => {
-    if (!ref.current || draggingRef.current) return;
-    const dom = Number(ref.current.value);
-    if (Math.abs(dom - value) > 0.0001) {
-      ref.current.value = String(value);
-    }
-  }, [value]);
 
   const schedule = (v: number) => {
     window.cancelAnimationFrame(rafRef.current);
@@ -156,30 +146,16 @@ const InlineSmoothRange = React.memo(({
 
   return (
     <input
-      ref={ref}
       type="range"
       min={min}
       max={max}
       step={step}
-      defaultValue={value}
+      value={value}
       className={className}
       disabled={disabled}
       style={{ touchAction: 'none' }}
       onInput={(e) => schedule(Number((e.target as HTMLInputElement).value))}
-      onChange={() => undefined}
-      onPointerDown={() => {
-        draggingRef.current = true;
-      }}
-      onPointerUp={() => {
-        draggingRef.current = false;
-        if (!ref.current) return;
-        onChange(Number(ref.current.value));
-      }}
-      onLostPointerCapture={() => {
-        draggingRef.current = false;
-        if (!ref.current) return;
-        onChange(Number(ref.current.value));
-      }}
+      onChange={(e) => onChange(Number((e.target as HTMLInputElement).value))}
     />
   );
 });

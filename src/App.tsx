@@ -1868,6 +1868,13 @@ export default function App() {
   const [flashNotice, setFlashNotice] = useState<{ text: string; tone: 'info' | 'error' | 'success' } | null>(null);
   const flashTimerRef = useRef<number | null>(null);
   const [resumeSnapshot, setResumeSnapshot] = useState<any>(null);
+  const [loginGateDismissed, setLoginGateDismissed] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('ai_storyteller_login_gate_dismissed') === '1';
+    } catch {
+      return false;
+    }
+  });
   const publishRetryTimersRef = useRef<Record<string, number[]>>({});
   const [youtubeAuth, setYoutubeAuth] = useState<YouTubeAuthSession | null>(null);
   const latestUiRef = useRef<any>(ui);
@@ -1887,7 +1894,14 @@ export default function App() {
   const hasValidYouTubeAuth = Boolean(youtubeAuth?.accessToken && youtubeAuth.expiresAt > Date.now());
   const googleLoginReady = Boolean(googleClientId && googleRedirectUri);
   const isOAuthCallbackPath = window.location.pathname.includes('/oauth/google/callback');
-  const shouldShowLoginGate = requireGoogleLogin && !hasValidYouTubeAuth && !isOAuthCallbackPath;
+  const shouldShowLoginGate =
+    requireGoogleLogin &&
+    !hasValidYouTubeAuth &&
+    !isOAuthCallbackPath &&
+    !loginGateDismissed &&
+    !resumeSnapshot &&
+    !ui.autoFlow.running &&
+    !ui.productPromo.running;
   const envAdminEmails = useMemo(
     () => String(env.VITE_ADMIN_EMAILS || '').split(',').map(normalizeEmail).filter(Boolean),
     [env.VITE_ADMIN_EMAILS],
@@ -1931,6 +1945,16 @@ export default function App() {
   useEffect(() => {
     setUi(prev => syncProductPromoPlanState(prev));
   }, [ui.productPromo.workflowMode, ui.productPromo.renderMode, ui.productPromo.manualHookVideoCount]);
+
+  useEffect(() => {
+    if (!hasValidYouTubeAuth) return;
+    try {
+      sessionStorage.removeItem('ai_storyteller_login_gate_dismissed');
+    } catch {
+      // ignore session storage errors
+    }
+    setLoginGateDismissed(false);
+  }, [hasValidYouTubeAuth]);
 
   useEffect(() => {
     const hasProductImages = (ui.productPromo.referenceImages || []).length > 0;
@@ -6620,6 +6644,20 @@ ${JSON.stringify(cutPayload)}`,
                   className="px-4 py-2.5 rounded-xl bg-cyan-500 text-black font-black"
                 >
                   Google로 시작하기
+                </button>
+                <button
+                  onClick={() => {
+                    try {
+                      sessionStorage.setItem('ai_storyteller_login_gate_dismissed', '1');
+                    } catch {
+                      // ignore session storage errors
+                    }
+                    setLoginGateDismissed(true);
+                    showNotice('로그인 없이 편집 모드로 계속 진행합니다.', 'info');
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-white/10 text-white font-black border border-white/15"
+                >
+                  로그인 없이 계속
                 </button>
               </div>
               <p className="text-[11px] text-slate-300/90">로그인 후 API를 입력해 대부분 기능을 사용할 수 있습니다. 저장/다운로드/유튜브 연동/발행은 승인 사용자만 가능합니다.</p>
