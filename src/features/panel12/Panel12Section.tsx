@@ -13,6 +13,68 @@ const TITLE_FONT_OPTIONS = [
   'Nanum Brush Script',
 ];
 
+const TEXT_SCALE_MIN = 0.7;
+const TEXT_SCALE_MAX = 2.2;
+const MM_TO_PX_1080 = 3.7795275591;
+
+const mmToPxScaled = (mm: number, width: number) => mm * MM_TO_PX_1080 * (width / 1080);
+
+const normalizeSubtitleText = (text: string) => String(text || '').replace(/\s+/g, ' ').trim();
+
+const splitSubtitleLines = (text: string, maxChars: number) => {
+  const manualLines = String(text || '')
+    .split(/\r?\n/)
+    .map(line => normalizeSubtitleText(line))
+    .filter(Boolean);
+  if (manualLines.length >= 2) {
+    return manualLines.slice(0, 2);
+  }
+
+  const clean = normalizeSubtitleText(text);
+  if (!clean) return [''];
+  const words = clean.split(' ');
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    if (!current) {
+      current = word;
+      continue;
+    }
+    const candidate = `${current} ${word}`;
+    if (candidate.length <= maxChars) {
+      current = candidate;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+
+  if (current) lines.push(current);
+  return lines.slice(0, 2);
+};
+
+const splitTitlePreviewLines = (text: string) => {
+  const manualLines = String(text || '')
+    .split(/\r?\n/)
+    .map(line => normalizeSubtitleText(line))
+    .filter(Boolean);
+  if (manualLines.length > 0) {
+    return manualLines.slice(0, 2).map(line => Array.from(line).slice(0, 10).join(''));
+  }
+
+  const compact = normalizeSubtitleText(text);
+  if (!compact) return [] as string[];
+  const chars = Array.from(compact);
+  const lines: string[] = [];
+  let cursor = 0;
+  while (cursor < chars.length && lines.length < 2) {
+    lines.push(chars.slice(cursor, cursor + 10).join('').trim());
+    cursor += 10;
+  }
+  return lines.filter(Boolean);
+};
+
 type Props = {
   ui: any;
   setUi: React.Dispatch<React.SetStateAction<any>>;
@@ -182,16 +244,34 @@ export default function Panel12Section(props: Props) {
   }, []);
 
   const previewTitleFontPx = React.useMemo(() => {
-    const renderFontAt1080 = Math.max(16, 18 * Math.max(0.75, Math.min(1.8, Number(ui.finalVideo.templateTitleScale || 1))));
+    const renderFontAt1080 = Math.max(16, 18 * Math.max(TEXT_SCALE_MIN, Math.min(TEXT_SCALE_MAX, Number(ui.finalVideo.templateTitleScale || 1))));
     return Math.max(8, renderFontAt1080 * (previewFrameWidth / 1080));
   }, [previewFrameWidth, ui.finalVideo.templateTitleScale]);
 
   const previewSubtitleFontPx = React.useMemo(() => {
     const preset = SUBTITLE_PRESETS[ui.finalVideo.subtitlePreset] as any;
     const baseScale = Number(preset?.fontScale || 0.045);
-    const subtitleScale = Math.max(0.7, Math.min(2.2, Number(ui.finalVideo.subtitleScale || 1)));
+    const subtitleScale = Math.max(TEXT_SCALE_MIN, Math.min(TEXT_SCALE_MAX, Number(ui.finalVideo.subtitleScale || 1)));
     return Math.max(10, Math.round(previewFrameWidth * baseScale * subtitleScale));
   }, [previewFrameWidth, ui.finalVideo.subtitlePreset, ui.finalVideo.subtitleScale, SUBTITLE_PRESETS]);
+
+  const previewSubtitleLines = React.useMemo(() => {
+    const activeCut = Number(ui.finalVideo.slides?.[ui.finalVideo.activeSlide]?.cut || 1);
+    const sourceText = ui.cuts.items?.[Math.max(0, activeCut - 1)] || '';
+    const maxChars = Math.max(12, Number(ui.finalVideo.subtitleMaxChars || 24));
+    return splitSubtitleLines(String(sourceText), maxChars).filter(Boolean).slice(0, 2);
+  }, [ui.finalVideo.slides, ui.finalVideo.activeSlide, ui.cuts.items, ui.finalVideo.subtitleMaxChars]);
+
+  const previewTitleLines = React.useMemo(() => {
+    return splitTitlePreviewLines(String(ui.finalVideo.templateTitleText || ''));
+  }, [ui.finalVideo.templateTitleText]);
+
+  const previewTitleTopPercent = React.useMemo(() => {
+    const previewHeight = previewFrameWidth * (16 / 9);
+    const topMm = Math.max(0, Number(ui.finalVideo.templateTitleLine1TopMm || 20));
+    const topPx = mmToPxScaled(topMm, previewFrameWidth);
+    return Math.max(1, Math.min(95, (topPx / Math.max(1, previewHeight)) * 100));
+  }, [previewFrameWidth, ui.finalVideo.templateTitleLine1TopMm]);
 
   const stopPreviewAudio = React.useCallback(() => {
     if (!previewAudioRef.current) return;
@@ -740,8 +820,8 @@ export default function Panel12Section(props: Props) {
                                 <span className="text-[10px] text-emerald-100 font-bold">{ui.finalVideo.templateTitleScale.toFixed(2)}x</span>
                               </div>
                               <InlineSmoothRange
-                                min={0.8}
-                                max={1.8}
+                                min={TEXT_SCALE_MIN}
+                                max={TEXT_SCALE_MAX}
                                 step={0.05}
                                 value={Number(ui.finalVideo.templateTitleScale || 1)}
                                 onChange={(v) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleScale: Number(v) } }))}
@@ -800,8 +880,8 @@ export default function Panel12Section(props: Props) {
                         <span className="text-[10px] text-emerald-100 font-bold">{Number(ui.finalVideo.subtitleScale || 1).toFixed(2)}x</span>
                       </div>
                       <InlineSmoothRange
-                        min={0.7}
-                        max={2.2}
+                        min={TEXT_SCALE_MIN}
+                        max={TEXT_SCALE_MAX}
                         step={0.05}
                         value={Number(ui.finalVideo.subtitleScale || 1)}
                         onChange={(v) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitleScale: Number(v) } }))}
@@ -1116,28 +1196,40 @@ export default function Panel12Section(props: Props) {
                     </div>
                     {ui.finalVideo.subtitleEnabled && (
                       <div
-                        className={`absolute left-1/2 -translate-x-1/2 -translate-y-1/2 w-[86%] px-4 py-2 rounded-xl border border-white/15 ${ui.finalVideo.subtitlePreset === 'shorts' ? 'bg-black/55' : ui.finalVideo.subtitlePreset === 'docu' ? 'bg-slate-950/70' : 'bg-slate-900/65'}`}
+                        className={`absolute left-1/2 -translate-x-1/2 -translate-y-1/2 w-[84%] rounded-xl border border-white/15 ${ui.finalVideo.subtitlePreset === 'shorts' ? 'bg-black/55' : ui.finalVideo.subtitlePreset === 'docu' ? 'bg-slate-950/70' : 'bg-slate-900/65'}`}
                         style={{ top: `${gridPositionToPercent(ui.finalVideo.subtitleGridPosition)}%` }}
                       >
                         <p
-                          className={`font-black leading-snug drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)] line-clamp-2 ${ui.finalVideo.subtitlePreset === 'shorts' ? 'text-white' : ui.finalVideo.subtitlePreset === 'docu' ? 'text-slate-100' : 'text-white'}`}
-                          style={{ fontSize: `${previewSubtitleFontPx}px` }}
+                          className={`font-black drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)] ${ui.finalVideo.subtitlePreset === 'shorts' ? 'text-white' : ui.finalVideo.subtitlePreset === 'docu' ? 'text-slate-100' : 'text-white'}`}
+                          style={{
+                            fontSize: `${previewSubtitleFontPx}px`,
+                            lineHeight: `${Math.round(previewSubtitleFontPx * 1.34)}px`,
+                            paddingTop: '14px',
+                            paddingBottom: '14px',
+                            textAlign: 'center',
+                            WebkitTextStroke: `${Math.max(1, Math.round(previewSubtitleFontPx * 0.08))}px rgba(0,0,0,0.9)`,
+                          }}
                         >
-                          {ui.cuts.items[(ui.finalVideo.slides[ui.finalVideo.activeSlide]?.cut || 1) - 1] || ''}
+                          {(previewSubtitleLines.length > 0 ? previewSubtitleLines : ['']).map((line, idx) => (
+                            <span key={`${line}-${idx}`} className="block">{line}</span>
+                          ))}
                         </p>
                       </div>
                     )}
                     {ui.finalVideo.templateTitleEnabled && Boolean(ui.finalVideo.templateTitleText) && (
-                      <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none" style={{ top: `${Math.max(5, Number(ui.finalVideo.templateTitleLine1TopMm || 20))}%` }}>
+                      <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none" style={{ top: `${previewTitleTopPercent}%` }}>
                         <p
                           className="font-black tracking-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] whitespace-pre-line text-center"
                           style={{
                             color: ui.finalVideo.templateTitleLine1Color || '#ff554a',
                             fontFamily: ui.finalVideo.templateTitleFontFamily || 'Pretendard',
                             fontSize: `${previewTitleFontPx}px`,
+                            lineHeight: `${Math.round(previewTitleFontPx * 1.1)}px`,
                           }}
                         >
-                          {String(ui.finalVideo.templateTitleText || '').slice(0, 20)}
+                          {(previewTitleLines.length > 0 ? previewTitleLines : ['']).map((line, idx) => (
+                            <span key={`${line}-${idx}`} className="block">{line}</span>
+                          ))}
                         </p>
                       </div>
                     )}
