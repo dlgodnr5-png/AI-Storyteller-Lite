@@ -262,6 +262,18 @@ const COUNTRY_MAP: Record<string, string> = {
   한국: 'KR', 미국: 'US', 일본: 'JP', 영국: 'GB', 독일: 'DE', 프랑스: 'FR', 베트남: 'VN'
 };
 
+const COUNTRY_TRANSLATION_LANG: Record<string, string> = {
+  한국: 'ko',
+  미국: 'en',
+  일본: 'ja',
+  영국: 'en-GB',
+  독일: 'de',
+  프랑스: 'fr',
+  베트남: 'vi',
+};
+
+const COUNTRY_ORDER = Object.keys(COUNTRY_MAP);
+
 const CATEGORY_MAP: Record<string, string> = {
   '모든 카테고리': '', 종교: '종교', 야담: '야담', 경제: '경제', 
   뉴스: '뉴스', 드라마: '드라마', 의학: '의학', AI기술: 'AI기술', 동물: '동물'
@@ -359,7 +371,7 @@ const VIDEO_STYLES_31 = [
 type SlideMotionType = 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right' | 'pan_up' | 'pan_down';
 type RenderResolution = 'sd' | 'hd' | 'fhd';
 type SubtitlePosition = 'bottom' | 'middle';
-type SubtitlePreset = 'shorts' | 'docu' | 'lecture';
+type SubtitlePreset = 'shorts' | 'docu' | 'lecture' | 'impact' | 'neon';
 type SubtitleEntryAnimation = 'none' | 'fade' | 'pop' | 'slide_up' | 'slide_down' | 'slide_left' | 'slide_right';
 type SubtitleHighlightStrength = 'low' | 'medium' | 'high';
 type SubtitleSegment = { start: number; end: number; text: string; lines: string[]; cut: number };
@@ -552,6 +564,22 @@ const SUBTITLE_PRESETS: Record<SubtitlePreset, {
     accentColor: '#93c5fd',
     boxColor: 'rgba(15, 23, 42, 0.6)',
     strokeColor: 'rgba(2, 6, 23, 0.9)',
+  },
+  impact: {
+    label: '임팩트형 강강조',
+    fontScale: 0.05,
+    textColor: '#fff7ed',
+    accentColor: '#fb7185',
+    boxColor: 'rgba(17, 24, 39, 0.68)',
+    strokeColor: 'rgba(0, 0, 0, 0.94)',
+  },
+  neon: {
+    label: '네온형 트렌드',
+    fontScale: 0.046,
+    textColor: '#e0f2fe',
+    accentColor: '#22d3ee',
+    boxColor: 'rgba(2, 6, 23, 0.62)',
+    strokeColor: 'rgba(8, 47, 73, 0.92)',
   },
 };
 
@@ -1019,22 +1047,23 @@ const drawTemplateTitleOverlay = (
     strokeColor: string;
     highlightWord: string;
     scale: number;
+    subtitlePreset?: SubtitlePreset;
   },
 ) => {
   const rawLines = text
     .split(/\r?\n/)
     .map(v => normalizeSubtitleText(v))
     .filter(Boolean);
-  const lines = rawLines.length > 0 ? rawLines.slice(0, 2) : splitToFixedLines(normalizeHookTitleForOverlay(text), 10, 2);
+  const lines = rawLines.length > 0 ? rawLines.slice(0, 2) : [normalizeHookTitleForOverlay(text)];
   if (lines.length === 0) return;
 
-  const maxCharsPerLine = 10;
-  const clampedLines = lines.map(line => Array.from(line).slice(0, maxCharsPerLine).join(''));
+  const clampedLines = lines;
   const topPx = mmToPxScaled(options.line1TopMm || 20, width);
   const bottomLimitPx = mmToPxScaled(options.line2BottomMm || 35, width);
   const fontFamily = (options.fontFamily || 'Anemone').trim() || 'Anemone';
-  const basePt = 18 * (width / 1080);
-  let fontPx = Math.max(16, basePt * Math.max(0.7, Math.min(2.2, options.scale || 1)));
+  const preset = SUBTITLE_PRESETS[options.subtitlePreset || 'shorts'] || SUBTITLE_PRESETS.shorts;
+  const basePx = Math.min(width, height) * preset.fontScale;
+  let fontPx = Math.max(16, basePx * Math.max(0.7, Math.min(2.2, options.scale || 1)));
   const highlightToken = cleanWordToken(options.highlightWord || '');
 
   const measure = () => {
@@ -1306,6 +1335,8 @@ const PRESET_SAMPLE_TEXT: Record<SubtitlePreset, string> = {
   shorts: '충격 반전! 핵심만 1초만에 꽂히게',
   docu: '차분하게 핵심 맥락을 전달하는 다큐 톤',
   lecture: '또렷하고 안정적인 학습/설명용 자막',
+  impact: '강하게 때리는 키워드 중심 임팩트 자막',
+  neon: '트렌디한 네온 포인트로 집중도 상승',
 };
 
 const BUILTIN_SUBTITLE_TEMPLATES: BuiltinSubtitleTemplate[] = [
@@ -1693,7 +1724,7 @@ export default function App() {
       subtitleMaxChars: 24,
       subtitleScale: 1,
       subtitlePosition: 'bottom' as SubtitlePosition,
-      subtitleGridPosition: 9,
+      subtitleGridPosition: 7,
       subtitlePreset: 'shorts' as SubtitlePreset,
       subtitleWordHighlight: false,
       subtitleHighlightStrength: 'low' as SubtitleHighlightStrength,
@@ -1707,14 +1738,14 @@ export default function App() {
       templateTitleEnabled: true,
       templateTitleText: '',
       templateTitleFontFamily: '아네모네',
-      templateTitleLine1TopMm: 20,
-      templateTitleLine2BottomMm: 35,
+      templateTitleLine1TopMm: 60,
+      templateTitleLine2BottomMm: 96,
       templateTitleLine1Color: '#ef4444',
       templateTitleLine2Color: '#111111',
       templateTitleHighlightColor: '#fde047',
       templateTitleHighlightWord: '',
       templateTitleStrokeColor: 'rgba(0,0,0,0.92)',
-      templateTitleScale: 1,
+      templateTitleScale: 2,
       templateTitleGenerating: false,
       transcoding: false,
       ffmpegReady: false,
@@ -1882,6 +1913,8 @@ export default function App() {
   const actionApiRef = useRef<any>({});
 
   const [results, setResults] = useState<any[]>([]);
+  const [translatedQueriesByCountry, setTranslatedQueriesByCountry] = useState<Record<string, string>>({});
+  const [searchCacheByCountry, setSearchCacheByCountry] = useState<Record<string, any[]>>({});
   const [subtitleTemplates, setSubtitleTemplates] = useState<SavedSubtitleTemplate[]>([]);
   const [templatePreviewOverrides, setTemplatePreviewOverrides] = useState<Record<string, string>>({});
   const initialUiRef = useRef<any>(null);
@@ -2017,6 +2050,16 @@ export default function App() {
   useEffect(() => {
     setUi(prev => sanitizeProductPromoImagesState(prev));
   }, [ui.productPromo.referenceImages, ui.productPromo.imageUrl]);
+
+  useEffect(() => {
+    const cached = searchCacheByCountry[ui.filters.country];
+    setResults(Array.isArray(cached) ? cached : []);
+  }, [ui.filters.country, searchCacheByCountry]);
+
+  useEffect(() => {
+    const query = String(ui.filters.query || '');
+    setTranslatedQueriesByCountry(prev => ({ ...prev, 한국: query }));
+  }, [ui.filters.query]);
   const currentManualStep = ui.script.generating ? '대본 생성' :
     ui.hookLoading ? '훅 제목 생성' :
     ui.thumbnail.generating ? '썸네일 생성' :
@@ -2476,86 +2519,149 @@ export default function App() {
   }, [ui.script.type]);
 
   // --- YouTube Logic ---
-  // --- Effects ---
-  useEffect(() => {
-    if (ui.filters.query) {
-      handleSearch();
-    }
-  }, [ui.filters.sort, ui.filters.period, ui.filters.duration, ui.filters.count]);
-
   const handleSearch = async () => {
     const apiKey = keys[activeKeys.yt as keyof typeof keys];
+    const rawQuery = normalizeSubtitleText(ui.filters.query || '');
     if (!apiKey) {
       setUi(prev => ({ ...prev, searchError: 'YouTube API 키를 설정하세요.' }));
       return;
     }
+    if (!rawQuery) {
+      setUi(prev => ({ ...prev, searchError: '검색어를 입력해 주세요.' }));
+      return;
+    }
 
     setUi(prev => ({ ...prev, searching: true, searchError: '' }));
-    
-    try {
+
+    const buildPublishedAfter = () => {
       const now = new Date();
-      let publishedAfter = '';
-      if (ui.filters.period === '오늘') {
-        publishedAfter = new Date(now.setDate(now.getDate() - 1)).toISOString();
-      } else if (ui.filters.period === '이번 주') {
-        publishedAfter = new Date(now.setDate(now.getDate() - 7)).toISOString();
-      } else if (ui.filters.period === '이번 달') {
-        publishedAfter = new Date(now.setMonth(now.getMonth() - 1)).toISOString();
-      } else if (ui.filters.period === '올해') {
-        publishedAfter = new Date(now.setFullYear(now.getFullYear() - 1)).toISOString();
+      if (ui.filters.period === '오늘') return new Date(now.setDate(now.getDate() - 1)).toISOString();
+      if (ui.filters.period === '이번 주') return new Date(now.setDate(now.getDate() - 7)).toISOString();
+      if (ui.filters.period === '이번 달') return new Date(now.setMonth(now.getMonth() - 1)).toISOString();
+      if (ui.filters.period === '올해') return new Date(now.setFullYear(now.getFullYear() - 1)).toISOString();
+      return '';
+    };
+
+    const translateQueries = async () => {
+      const fallback = COUNTRY_ORDER.reduce<Record<string, string>>((acc, country) => {
+        const existing = normalizeSubtitleText(translatedQueriesByCountry[country] || '');
+        acc[country] = existing || rawQuery;
+        return acc;
+      }, {});
+      fallback['한국'] = rawQuery;
+      if (!keys.g1) return fallback;
+
+      try {
+        const ai = new GoogleGenAI({ apiKey: keys.g1 });
+        const translationRes = await generateContentWithFallback(ai, {
+          model: 'gemini-2.5-flash',
+          contents: [
+            {
+              parts: [
+                {
+                  text: `다음 한국어 검색어를 국가별 유튜브 검색용 자연어로 번역하세요.
+
+원문: ${rawQuery}
+국가: 한국, 미국, 일본, 영국, 독일, 프랑스, 베트남
+
+규칙:
+- 한국은 원문 그대로 유지
+- 유튜브 검색에 적합한 짧은 키워드형 문장
+- 추가 설명 없이 JSON만 반환
+
+JSON 스키마:
+{"한국":"","미국":"","일본":"","영국":"","독일":"","프랑스":"","베트남":""}`,
+                },
+              ],
+            },
+          ],
+          config: { responseMimeType: 'application/json' },
+        });
+        const parsed = JSON.parse(translationRes.text || '{}');
+        const merged = { ...fallback };
+        COUNTRY_ORDER.forEach(country => {
+          const v = normalizeSubtitleText(String(parsed?.[country] || ''));
+          if (v) merged[country] = v;
+        });
+        return merged;
+      } catch {
+        return fallback;
       }
+    };
 
-      const query = ui.filters.category !== '모든 카테고리' 
-        ? `${ui.filters.query} ${ui.filters.category}` 
-        : ui.filters.query;
-
+    const searchOneCountry = async (country: string, localizedQuery: string) => {
+      const queryWithCategory = ui.filters.category !== '모든 카테고리'
+        ? `${localizedQuery} ${ui.filters.category}`
+        : localizedQuery;
       const params: any = {
         part: 'snippet',
         type: 'video',
-        q: query,
-        maxResults: String(ui.filters.count),
+        q: queryWithCategory,
+        maxResults: '50',
         key: apiKey,
         order: ui.filters.sort === '조회수' ? 'viewCount' : 'date',
-        regionCode: COUNTRY_MAP[ui.filters.country] || 'KR',
+        regionCode: COUNTRY_MAP[country] || 'KR',
+        relevanceLanguage: COUNTRY_TRANSLATION_LANG[country] || 'ko',
       };
-
+      const publishedAfter = buildPublishedAfter();
       if (publishedAfter) params.publishedAfter = publishedAfter;
       if (ui.filters.duration !== '전체') params.videoDuration = ui.filters.duration;
 
       const searchParams = new URLSearchParams(params);
       const res = await fetch(`https://www.googleapis.com/youtube/v3/search?${searchParams.toString()}`);
       const data = await res.json();
-      
-      if (!res.ok) throw new Error(data?.error?.message || '검색 실패');
+      if (!res.ok) throw new Error(data?.error?.message || `${country} 검색 실패`);
 
-      const videoIds = data.items.map((i: any) => i.id.videoId).join(',');
-      if (!videoIds) {
-        setResults([]);
-        setUi(prev => ({ ...prev, searching: false }));
-        return;
-      }
+      const videoIds = (data.items || []).map((i: any) => i?.id?.videoId).filter(Boolean).join(',');
+      if (!videoIds) return [] as any[];
 
       const statsRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=statistics,contentDetails&id=${videoIds}&key=${apiKey}`);
       const statsData = await statsRes.json();
+      const statsItems = Array.isArray(statsData?.items) ? (statsData.items as any[]) : [];
 
-      const combined = data.items.map((item: any) => {
-        const stats = statsData.items.find((s: any) => s.id === item.id.videoId);
+      return (data.items || []).map((item: any) => {
+        const matched = statsItems.find((s: any) => String(s?.id || '') === String(item?.id?.videoId || ''));
+        const stats = matched?.statistics || {};
         return {
           id: item.id.videoId,
           title: item.snippet.title,
           thumbnail: item.snippet.thumbnails.medium.url,
           channelTitle: item.snippet.channelTitle,
           publishedAt: item.snippet.publishedAt,
-          viewCount: Number(stats?.statistics?.viewCount || 0),
-          likeCount: Number(stats?.statistics?.likeCount || 0),
-          commentCount: Number(stats?.statistics?.commentCount || 0),
+          viewCount: Number(stats?.viewCount || 0),
+          likeCount: Number(stats?.likeCount || 0),
+          commentCount: Number(stats?.commentCount || 0),
           url: `https://youtube.com/watch?v=${item.id.videoId}`,
+          country,
+          translatedQuery: localizedQuery,
         };
       }).filter((v: any) => v.viewCount >= ui.filters.minViews);
+    };
 
-      setResults(combined);
+    try {
+      const translations = await translateQueries();
+      setTranslatedQueriesByCountry(translations);
+
+      const nextCache: Record<string, any[]> = {};
+      const failedCountries: string[] = [];
+      for (const country of COUNTRY_ORDER) {
+        const localizedQuery = normalizeSubtitleText(translations[country] || rawQuery) || rawQuery;
+        try {
+          const rows = await searchOneCountry(country, localizedQuery);
+          nextCache[country] = rows;
+        } catch {
+          nextCache[country] = [];
+          failedCountries.push(country);
+        }
+      }
+
+      setSearchCacheByCountry(nextCache);
+      setResults(nextCache[ui.filters.country] || []);
+      if (failedCountries.length > 0) {
+        setUi(prev => ({ ...prev, searchError: `${failedCountries.join(', ')} 검색 실패 (다른 국가는 반영됨)` }));
+      }
     } catch (err: any) {
-      setUi(prev => ({ ...prev, searchError: err.message }));
+      setUi(prev => ({ ...prev, searchError: err?.message || '검색 실패' }));
     } finally {
       setUi(prev => ({ ...prev, searching: false }));
     }
@@ -2921,6 +3027,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
 
   const [previewLoading, setPreviewLoading] = useState(false);
   const [productBgmPreviewing, setProductBgmPreviewing] = useState(false);
+  const [fixedBgmPreviewing, setFixedBgmPreviewing] = useState(false);
 
   const handlePreviewProductBgm = async () => {
     const track = String(latestUiRef.current?.finalVideo?.bgmTrack || '').trim();
@@ -2953,6 +3060,41 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       setProductBgmPreviewing(true);
     } catch {
       setProductBgmPreviewing(false);
+      showNotice('브라우저 자동재생 제한으로 미리듣기에 실패했습니다.', 'error');
+    }
+  };
+
+  const handlePreviewFixedBgm = async (trackPath: string) => {
+    const track = String(trackPath || '').trim();
+    if (!track) {
+      showNotice('배경음악을 먼저 선택해 주세요.', 'error');
+      return;
+    }
+    if (fixedBgmPreviewing && previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+      setFixedBgmPreviewing(false);
+      return;
+    }
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+    const audio = new Audio(encodeURI(track));
+    audio.loop = true;
+    audio.volume = 0.45;
+    audio.onended = () => setFixedBgmPreviewing(false);
+    audio.onpause = () => setFixedBgmPreviewing(false);
+    audio.onerror = () => {
+      setFixedBgmPreviewing(false);
+      showNotice('배경음악 미리듣기를 시작할 수 없습니다.', 'error');
+    };
+    previewAudioRef.current = audio;
+    try {
+      await audio.play();
+      setFixedBgmPreviewing(true);
+    } catch {
+      setFixedBgmPreviewing(false);
       showNotice('브라우저 자동재생 제한으로 미리듣기에 실패했습니다.', 'error');
     }
   };
@@ -3408,13 +3550,10 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       .filter((value: string, index: number, arr: string[]) => arr.indexOf(value) === index);
     const canAssignOriginalByCut =
       Boolean(latestUiRef.current?.productPromo?.strictProductLock) &&
-      productReferences.length > 0 && (
-        latestUiRef.current?.productPromo?.workflowMode === 'auto' || (
-          productReferences.length > 1 &&
-          prompts.length > 0 &&
-          productReferences.length >= prompts.length
-        )
-      );
+      latestUiRef.current?.productPromo?.workflowMode !== 'auto' &&
+      productReferences.length > 1 &&
+      prompts.length > 0 &&
+      productReferences.length >= prompts.length;
 
     if (canAssignOriginalByCut) {
       setUi(prev => {
@@ -3818,18 +3957,18 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
         }
         await new Promise(r => setTimeout(r, 0));
         setUi(prev => {
-          const compactTitle = compressTitleForPublish(prev.finalVideo.templateTitleText || prev.description.kr.title || title || '');
+          const selectedTitle = normalizeSubtitleText(prev.finalVideo.templateTitleText || prev.description.kr.title || title || '');
           return {
             ...prev,
             finalVideo: {
               ...prev.finalVideo,
-              templateTitleText: compactTitle || prev.finalVideo.templateTitleText,
+              templateTitleText: selectedTitle || prev.finalVideo.templateTitleText,
             },
             description: {
               ...prev.description,
               kr: {
                 ...prev.description.kr,
-                title: compactTitle || prev.description.kr.title,
+                title: selectedTitle || prev.description.kr.title,
               },
             },
           };
@@ -3904,24 +4043,24 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       await persistAutoSnapshot(3, 'running');
       }
 
-      if (opts?.productMode && Number(latestUiRef.current?.tts?.measuredDuration || 0) > 20) {
-        const lang = (['KR', 'EN', 'JP'].includes(latestUiRef.current?.script?.lang) ? latestUiRef.current?.script?.lang : 'KR') as 'KR' | 'EN' | 'JP';
-        const stricter = trimScriptToSeconds(latestUiRef.current?.script?.output || '', lang, 17);
-        setUi(prev => ({ ...prev, script: { ...prev.script, output: stricter } }));
-        await new Promise(r => setTimeout(r, 0));
-        try {
-          const effectiveProvider: 'gemini' | 'elevenlabs' = String(latestUiRef.current?.tts?.status || '').includes('ElevenLabs')
-            ? 'elevenlabs'
-            : 'gemini';
-          await withRetries(
-            'TTS 재생성(20초 보정)',
-            () => actionApiRef.current.handleGenerateTTS(effectiveProvider),
-            () => Boolean(latestUiRef.current?.tts?.audioUrl) && Number(latestUiRef.current?.tts?.measuredDuration || 0) <= 20,
-            2,
-          );
-        } catch (ttsTrimErr) {
-          if (!latestUiRef.current?.tts?.audioUrl) throw ttsTrimErr;
-          setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, step: 'TTS 보정 한계(20초 초과, 계속 진행)' } }));
+      if (opts?.productMode) {
+        const measured = Math.max(0, Number(latestUiRef.current?.tts?.measuredDuration || 0));
+        if (measured > 0) {
+          const ttsBasedCuts = Math.max(3, Math.min(24, Math.ceil(measured / 3)));
+          setUi(prev => ({
+            ...prev,
+            productPromo: {
+              ...prev.productPromo,
+              targetCuts: ttsBasedCuts,
+              targetSeconds: ttsBasedCuts * 3,
+            },
+            autoFlow: {
+              ...prev.autoFlow,
+              step: `컷 재계산 (TTS ${measured.toFixed(1)}초 → ${ttsBasedCuts}컷)`,
+            },
+          }));
+          appendAutoLog(`TTS 실측 ${measured.toFixed(1)}초 기준 컷 재계산: ${ttsBasedCuts}컷 (컷당 3초)`);
+          await new Promise(r => setTimeout(r, 0));
         }
       }
 
@@ -3931,8 +4070,12 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       }
 
       if (opts?.productMode) {
-        const targetCuts = Math.max(3, Math.min(8, Number(opts?.productTargetCuts ?? 7)));
-        const compact = compactCutsToMax([...(latestUiRef.current?.cuts?.items || [])], targetCuts);
+        const measured = Math.max(0, Number(latestUiRef.current?.tts?.measuredDuration || 0));
+        const ttsBasedCuts = measured > 0
+          ? Math.max(3, Math.min(24, Math.ceil(measured / 3)))
+          : Math.max(3, Math.min(24, Number(opts?.productTargetCuts ?? latestUiRef.current?.productPromo?.targetCuts ?? 7)));
+        const balanced = rebalanceCutsToTarget([...(latestUiRef.current?.cuts?.items || [])], ttsBasedCuts);
+        const compact = compactCutsToMax(balanced, ttsBasedCuts);
         setUi(prev => ({ ...prev, cuts: { ...prev.cuts, items: compact } }));
       }
 
@@ -3998,7 +4141,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       }
 
       const current = latestUiRef.current;
-      const templateTitle = compressTitleForPublish(current?.finalVideo?.templateTitleText || current?.description?.kr?.title || title || '');
+      const templateTitle = normalizeSubtitleText(current?.finalVideo?.templateTitleText || current?.description?.kr?.title || title || '');
       const autoDescBody = (current?.description?.kr?.desc || '').trim();
       const autoTags = (current?.description?.kr?.tags || '').trim();
       const autoHash = (current?.description?.kr?.hashtags || '').trim();
@@ -4212,7 +4355,95 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       const ai = new GoogleGenAI({ apiKey: keys.g1 });
       const productUrl = (ui.productPromo.productUrl || '').trim();
       const productComment = (ui.productPromo.productComment || '').trim();
-      const trendContext = (results || [])
+      const productImage = String(ui.productPromo.imageUrl || '').trim();
+      const productInline = (() => {
+        const match = productImage.match(/^data:(.*?);base64,(.*)$/i);
+        if (!match) return null;
+        return { inlineData: { mimeType: match[1] || 'image/jpeg', data: match[2] || '' } };
+      })();
+
+      let imageInsight: any = {};
+      if (productInline) {
+        try {
+          const imageInsightRes = await generateContentWithFallback(ai, {
+            model: 'gemini-2.5-pro',
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `업로드된 상품 이미지에서 한국 쇼츠 마케팅용 핵심 정보를 추출하세요.
+
+[출력 규칙]
+- 한국어 JSON만 반환
+- 가격/할인율/최저가/비용 관련 정보는 절대 포함하지 말 것
+- 확신이 낮으면 빈 문자열로 반환
+
+JSON 스키마:
+{"productName":"","modelNumber":"","usagePurpose":"","usageScenarios":"","targetUsers":"","visibleTexts":"","searchKeywords":""}`,
+                  },
+                  productInline as any,
+                ],
+              },
+            ],
+            config: { responseMimeType: 'application/json' },
+          });
+          imageInsight = JSON.parse(imageInsightRes.text || '{}');
+        } catch {
+          imageInsight = {};
+        }
+      }
+
+      const youtubeSeed = [
+        String(imageInsight?.productName || ''),
+        String(imageInsight?.modelNumber || ''),
+        String(imageInsight?.searchKeywords || ''),
+        String(productComment || ''),
+      ]
+        .map(v => normalizeSubtitleText(v))
+        .filter(Boolean)
+        .join(' ')
+        .slice(0, 160);
+
+      let productTrendContext = '';
+      if ((keys.yt1 || '').trim() && youtubeSeed) {
+        try {
+          const params = new URLSearchParams({
+            part: 'snippet',
+            type: 'video',
+            q: `${youtubeSeed} 리뷰 사용법`,
+            maxResults: '8',
+            key: String(keys.yt1 || '').trim(),
+            order: 'viewCount',
+            regionCode: 'KR',
+            relevanceLanguage: 'ko',
+          });
+          const res = await fetch(`https://www.googleapis.com/youtube/v3/search?${params.toString()}`);
+          const data = await res.json();
+          if (res.ok && Array.isArray(data?.items) && data.items.length > 0) {
+            const ids = data.items.map((item: any) => item?.id?.videoId).filter(Boolean).join(',');
+            let statsMap = new Map<string, any>();
+            if (ids) {
+              const statRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${ids}&key=${String(keys.yt1 || '').trim()}`);
+              const statData = await statRes.json();
+              if (statRes.ok && Array.isArray(statData?.items)) {
+                statsMap = new Map(statData.items.map((v: any) => [String(v.id), v.statistics || {}]));
+              }
+            }
+            productTrendContext = data.items
+              .slice(0, 6)
+              .map((item: any, idx: number) => {
+                const vid = String(item?.id?.videoId || '');
+                const stats = statsMap.get(vid) || {};
+                return `${idx + 1}) ${String(item?.snippet?.title || '')} | 조회수 ${formatNumber(Number(stats?.viewCount || 0))}`;
+              })
+              .join('\n');
+          }
+        } catch {
+          productTrendContext = '';
+        }
+      }
+
+      const trendContext = productTrendContext || (results || [])
         .slice(0, 6)
         .map((r: any, i: number) => `${i + 1}) ${r.title} | 조회수 ${formatNumber(Number(r.viewCount || 0))}`)
         .join('\n');
@@ -4222,8 +4453,8 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
           {
             parts: [
               {
-                text: `당신은 한국 쇼츠 커머스 카피라이터입니다.
-다음 정보를 종합해 20초 이하 상품홍보용 훅을 설계하세요.
+                text: `당신은 한국 쇼츠 커머스 카피라이터이자 상품 분석가입니다.
+다음 정보를 종합해 한국 문화 맥락에 맞는 상품홍보 자동화 데이터를 설계하세요.
 
 [사용자 상품 URL]
 ${productUrl || '미입력'}
@@ -4231,20 +4462,31 @@ ${productUrl || '미입력'}
 [사용자 코멘트]
 ${productComment || '미입력'}
 
+[상품 이미지 분석]
+품명: ${String(imageInsight?.productName || '') || '미확인'}
+제품넘버: ${String(imageInsight?.modelNumber || '') || '미확인'}
+용도: ${String(imageInsight?.usagePurpose || '') || '미확인'}
+사용 장면: ${String(imageInsight?.usageScenarios || '') || '미확인'}
+사용층: ${String(imageInsight?.targetUsers || '') || '미확인'}
+패키지/라벨 텍스트: ${String(imageInsight?.visibleTexts || '') || '미확인'}
+
 [YouTube 트렌드 참고 데이터]
 ${trendContext || '데이터 없음(검색 미실행)'}
 
 [필수 규칙]
 1) 한국어로만 작성
-2) 과장/낚시 금지, 즉시 구매욕을 자극하는 후킹 문장
+2) 사실 기반으로 강한 후킹 문장을 작성(거짓/허위 금지)
 3) 타깃은 한국 사용자
 4) ${plan.targetSeconds}초 내외 쇼츠에 맞는 압축 정보
-5) URL 텍스트에서 상품의 핵심 효익/차별점/타깃을 추론
-6) 상품 이미지 다운로드/가져오기/분석은 시도하지 말 것
-7) 후속 이미지 연출은 업로드된 원본 상품 사진을 기준으로 배경/구도만 바꾸도록 지시 문구 생성
+5) 품명/제품넘버/용도/사용층을 최대한 명확하게 정리
+6) 가격/할인/비용 정보는 절대 생성하지 말 것
+7) 소비자가 행동하게 만드는 CTA 포함: 예) "안 사면 손해" 계열의 긴급성 문구(허위 없이)
+8) 고정댓글 유도 문구 포함: 예) "구매 링크는 고정댓글 확인"
+9) 후속 이미지 연출은 업로드된 원본 상품 사진을 기준으로 제품은 유지, 배경/구도만 컷별 변주
+10) 모든 컷 연출은 한국 생활 맥락(주거/오피스/카페/출근/육아/운동 등) 우선
 
 JSON만 반환:
-{"hookTitle":"...","tone":"...","audience":"...","scriptHint":"...","visualGuide":"...","productAnchor":"...","detectedTexts":"..."}`,
+{"hookTitle":"...","tone":"...","audience":"...","scriptHint":"...","visualGuide":"...","productAnchor":"...","detectedTexts":"...","productName":"...","modelNumber":"...","usagePurpose":"...","usageScenarios":"...","ctaLine":"...","pinnedCommentCta":"..."}`,
               },
             ],
           },
@@ -4287,7 +4529,24 @@ JSON만 반환:
           targetSeconds: plan.targetSeconds,
           step: '자동 제작 중',
           visualAnchor: String(parsed?.productAnchor || ''),
-          detectedTexts: String(parsed?.detectedTexts || ''),
+          detectedTexts: [
+            String(parsed?.detectedTexts || imageInsight?.visibleTexts || ''),
+            parsed?.productName ? `품명:${String(parsed.productName)}` : '',
+            parsed?.modelNumber ? `제품넘버:${String(parsed.modelNumber)}` : '',
+            parsed?.usagePurpose ? `용도:${String(parsed.usagePurpose)}` : '',
+            parsed?.usageScenarios ? `사용장면:${String(parsed.usageScenarios)}` : '',
+          ].filter(Boolean).join(' | '),
+        },
+        description: {
+          ...prev.description,
+          kr: {
+            ...prev.description.kr,
+            desc: [
+              normalizeSubtitleText(String(parsed?.scriptHint || '')),
+              normalizeSubtitleText(String(parsed?.ctaLine || '')),
+              normalizeSubtitleText(String(parsed?.pinnedCommentCta || '구매 링크는 고정댓글에서 확인하세요.')),
+            ].filter(Boolean).join('\n'),
+          },
         },
       }));
 
@@ -4523,6 +4782,16 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
     };
     setUi(mergedUi);
     setResults(Array.isArray(parsed.results) ? parsed.results : []);
+    setTranslatedQueriesByCountry(
+      parsed?.translatedQueriesByCountry && typeof parsed.translatedQueriesByCountry === 'object'
+        ? parsed.translatedQueriesByCountry
+        : {},
+    );
+    setSearchCacheByCountry(
+      parsed?.searchCacheByCountry && typeof parsed.searchCacheByCountry === 'object'
+        ? parsed.searchCacheByCountry
+        : {},
+    );
 
     if (count > 0) {
       alert(`프로젝트를 불러왔습니다. 만료된 임시 미디어 ${count}개(blob:)는 제외되었습니다. 필요하면 다시 생성해 주세요.`);
@@ -4578,6 +4847,8 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
       },
       ui: sanitizedUi,
       results,
+      translatedQueriesByCountry,
+      searchCacheByCountry,
       timestamp: new Date().toISOString(),
     };
 
@@ -4616,6 +4887,8 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
       setUi(JSON.parse(JSON.stringify(initialUiRef.current)));
     }
     setResults([]);
+    setTranslatedQueriesByCountry({});
+    setSearchCacheByCountry({});
     setPreviewingId(null);
     setPreviewLoading(false);
     alert('자동 저장 후 새 프로젝트로 초기화했습니다.');
@@ -5029,58 +5302,18 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
       alert('먼저 바이럴 제목을 선택해 주세요.');
       return;
     }
-    if (!keys.g1) {
-      const fallback = normalizeHookTitleForOverlay(ui.selectedHookTitle);
-      setUi(prev => ({
-        ...prev,
-        finalVideo: {
-          ...prev.finalVideo,
-          templateTitleText: fallback,
-          templateTitleHighlightWord: splitToFixedLines(fallback, 10, 2)[0]?.split(/\s+/)[0] || '',
-        },
-      }));
-      alert('AI 키가 없어 선택한 제목을 규칙에 맞게만 정리했습니다.');
-      return;
-    }
-
-    setUi(prev => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleGenerating: true } }));
-    try {
-      const ai = new GoogleGenAI({ apiKey: keys.g1 });
-      const prompt = `다음 원본 제목을 쇼츠 훅 문장으로 재작성하세요.\n원본: ${ui.selectedHookTitle}\n\n규칙:\n1) 전체 최대 20자\n2) 최대 2줄, 각 줄 최대 10자\n3) 과장/낚시 금지, 강한 훅 유지\n4) 출력 JSON만: {"title":"...","highlight":"..."}`;
-      const response = await generateContentWithFallback(ai, {
-        model: 'gemini-2.5-pro',
-        contents: prompt,
-        config: { responseMimeType: 'application/json' },
-      });
-      const parsed = JSON.parse(response.text || '{}');
-      const normalized = normalizeHookTitleForOverlay(String(parsed?.title || ui.selectedHookTitle));
-      const firstLine = normalized.split(/\r?\n/)[0] || '';
-      const fallbackHighlight = firstLine.split(/\s+/).find(Boolean) || firstLine;
-      const highlight = normalizeSubtitleText(String(parsed?.highlight || fallbackHighlight));
-
-      setUi(prev => ({
-        ...prev,
-        finalVideo: {
-          ...prev.finalVideo,
-          templateTitleText: normalized,
-          templateTitleHighlightWord: Array.from(highlight).slice(0, 10).join(''),
-          templateTitleGenerating: false,
-        },
-      }));
-    } catch (err) {
-      console.error(err);
-      const fallback = normalizeHookTitleForOverlay(ui.selectedHookTitle);
-      setUi(prev => ({
-        ...prev,
-        finalVideo: {
-          ...prev.finalVideo,
-          templateTitleText: fallback,
-          templateTitleHighlightWord: splitToFixedLines(fallback, 10, 2)[0]?.split(/\s+/)[0] || '',
-          templateTitleGenerating: false,
-        },
-      }));
-      alert('제목 AI 재작성 중 오류가 있어 규칙 기반 제목으로 대체했습니다.');
-    }
+    const selectedTitle = String(ui.selectedHookTitle || '').trim();
+    const firstLine = selectedTitle.split(/\r?\n/)[0] || '';
+    const fallbackHighlight = firstLine.split(/\s+/).find(Boolean) || firstLine;
+    setUi(prev => ({
+      ...prev,
+      finalVideo: {
+        ...prev.finalVideo,
+        templateTitleText: selectedTitle,
+        templateTitleHighlightWord: normalizeSubtitleText(fallbackHighlight),
+        templateTitleGenerating: false,
+      },
+    }));
   };
 
   const fetchChannelInsights = async (accountId: string) => {
@@ -5347,6 +5580,12 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
     </div>
   );
 
+  const jumpToPanel = (id: keyof typeof ui.panelsOpen) => {
+    const el = document.getElementById(`panel-${id}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   const generateImage = async (cutIndex: number, options?: { force?: boolean }) => {
     if (!keys.g1) {
       showNotice('Gemini 키가 필요합니다.', 'error');
@@ -5364,12 +5603,9 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
     const totalCuts = Math.max(1, Number(latest?.cuts?.items?.length || 0));
     const canAssignOriginalByCut =
       Boolean(latest?.productPromo?.strictProductLock) &&
-      productReferences.length > 0 && (
-        latest?.productPromo?.workflowMode === 'auto' || (
-          productReferences.length > 1 &&
-          productReferences.length >= totalCuts
-        )
-      );
+      latest?.productPromo?.workflowMode !== 'auto' &&
+      productReferences.length > 1 &&
+      productReferences.length >= totalCuts;
     const anchorImage = productReferences.length > 0
       ? String(productReferences[(Math.max(1, cutIndex) - 1) % productReferences.length])
       : baseProductImage;
@@ -5408,6 +5644,9 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
       const hasProductReference = productDataUrl.startsWith('data:image/');
       const hasProductUrlReference = /^https?:\/\//i.test(productDataUrl);
       const useExperimentalBgCutout = Boolean(latest?.productPromo?.experimentalBgCutout);
+      const koreaContextText = latest?.productPromo?.workflowMode === 'auto'
+        ? 'All generated scenes must reflect Korean daily culture and environment (Korean homes, offices, cafes, commute, fitness, parenting, convenience stores) without changing product identity.'
+        : '';
       const productRefText = productDataUrl
         ? 'Use the reference product image as strict anchor. Keep product shape, cap, color, logo, package text, and label layout unchanged. Only vary surrounding environment, camera angle, and background concept to match each cut narration.'
         : '';
@@ -5427,7 +5666,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
         contents: {
           parts: [
             {
-              text: `${promptObj.prompt}. Style: ${stylePrompt}. ${productRefText} ${productCutoutText}${hasProductUrlReference ? ` Reference image URL: ${productDataUrl}` : ''}`.trim(),
+              text: `${promptObj.prompt}. Style: ${stylePrompt}. ${productRefText} ${koreaContextText} ${productCutoutText}${hasProductUrlReference ? ` Reference image URL: ${productDataUrl}` : ''}`.trim(),
             },
             ...(productInline ? [productInline as any] : []),
           ],
@@ -6041,6 +6280,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
                 strokeColor: ui.finalVideo.templateTitleStrokeColor,
                 highlightWord: ui.finalVideo.templateTitleHighlightWord,
                 scale: ui.finalVideo.templateTitleScale,
+                subtitlePreset: ui.finalVideo.subtitlePreset,
               },
             );
           }
@@ -6156,7 +6396,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
       shorts: {
         subtitlePreset: 'shorts',
         subtitlePosition: 'bottom',
-        subtitleGridPosition: 9,
+        subtitleGridPosition: 7,
         subtitleMaxChars: 20,
         subtitleWordHighlight: true,
         subtitleHighlightStrength: 'high',
@@ -6165,7 +6405,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
       docu: {
         subtitlePreset: 'docu',
         subtitlePosition: 'bottom',
-        subtitleGridPosition: 9,
+        subtitleGridPosition: 7,
         subtitleMaxChars: 28,
         subtitleWordHighlight: false,
         subtitleHighlightStrength: 'low',
@@ -6174,11 +6414,29 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
       lecture: {
         subtitlePreset: 'lecture',
         subtitlePosition: 'middle',
-        subtitleGridPosition: 5,
+        subtitleGridPosition: 7,
         subtitleMaxChars: 26,
         subtitleWordHighlight: true,
         subtitleHighlightStrength: 'medium',
         subtitleEntryAnimation: 'fade',
+      },
+      impact: {
+        subtitlePreset: 'impact',
+        subtitlePosition: 'bottom',
+        subtitleGridPosition: 7,
+        subtitleMaxChars: 20,
+        subtitleWordHighlight: true,
+        subtitleHighlightStrength: 'high',
+        subtitleEntryAnimation: 'pop',
+      },
+      neon: {
+        subtitlePreset: 'neon',
+        subtitlePosition: 'bottom',
+        subtitleGridPosition: 7,
+        subtitleMaxChars: 24,
+        subtitleWordHighlight: true,
+        subtitleHighlightStrength: 'medium',
+        subtitleEntryAnimation: 'slide_up',
       },
     };
 
@@ -6199,7 +6457,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
         ...prev.finalVideo,
         subtitlePreset: template.subtitlePreset,
         subtitlePosition: template.subtitlePosition,
-        subtitleGridPosition: Number(template.subtitleGridPosition || (template.subtitlePosition === 'middle' ? 5 : 9)),
+        subtitleGridPosition: Number(template.subtitleGridPosition || 7),
         subtitleMaxChars: template.subtitleMaxChars,
         subtitleWordHighlight: template.subtitleWordHighlight,
         subtitleHighlightStrength: template.subtitleHighlightStrength,
@@ -6222,7 +6480,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
         ...prev.finalVideo,
         subtitlePreset: selected.config.subtitlePreset,
         subtitlePosition: selected.config.subtitlePosition,
-        subtitleGridPosition: Number(selected.config.subtitleGridPosition || (selected.config.subtitlePosition === 'middle' ? 5 : 9)),
+        subtitleGridPosition: Number(selected.config.subtitleGridPosition || 7),
         subtitleMaxChars: selected.config.subtitleMaxChars,
         subtitleWordHighlight: selected.config.subtitleWordHighlight,
         subtitleHighlightStrength: selected.config.subtitleHighlightStrength,
@@ -6232,14 +6490,14 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
         templateTitleEnabled: true,
         templateTitleText: defaultTitleText,
         templateTitleFontFamily: '아네모네',
-        templateTitleLine1TopMm: 20,
-        templateTitleLine2BottomMm: 35,
+        templateTitleLine1TopMm: 60,
+        templateTitleLine2BottomMm: 96,
         templateTitleLine1Color: '#ef4444',
         templateTitleLine2Color: '#111111',
         templateTitleHighlightColor: '#fde047',
         templateTitleHighlightWord: defaultHighlightWord,
         templateTitleStrokeColor: 'rgba(0,0,0,0.92)',
-        templateTitleScale: 1,
+        templateTitleScale: 2,
         subtitleTemplateLockEnabled: true,
         subtitleTemplateLockedId: templateId,
       },
@@ -6340,9 +6598,9 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
         .filter((t: any) => t && typeof t.name === 'string')
         .map((t: any, idx: number) => ({
           name: `${filenameStem}${idx === 0 ? '' : `_${idx + 1}`}`.slice(0, 40),
-          subtitlePreset: (['shorts', 'docu', 'lecture'].includes(t.subtitlePreset) ? t.subtitlePreset : 'shorts') as SubtitlePreset,
+          subtitlePreset: (['shorts', 'docu', 'lecture', 'impact', 'neon'].includes(t.subtitlePreset) ? t.subtitlePreset : 'shorts') as SubtitlePreset,
           subtitlePosition: (['bottom', 'middle'].includes(t.subtitlePosition) ? t.subtitlePosition : 'bottom') as SubtitlePosition,
-          subtitleGridPosition: Number.isFinite(t.subtitleGridPosition) ? Math.min(10, Math.max(1, Number(t.subtitleGridPosition))) : 9,
+          subtitleGridPosition: Number.isFinite(t.subtitleGridPosition) ? Math.min(10, Math.max(1, Number(t.subtitleGridPosition))) : 7,
           subtitleMaxChars: Number.isFinite(t.subtitleMaxChars) ? Math.min(40, Math.max(12, Number(t.subtitleMaxChars))) : 24,
           subtitleWordHighlight: Boolean(t.subtitleWordHighlight),
           subtitleHighlightStrength: (['low', 'medium', 'high'].includes(t.subtitleHighlightStrength) ? t.subtitleHighlightStrength : 'medium') as SubtitleHighlightStrength,
@@ -6619,6 +6877,23 @@ ${JSON.stringify(cutPayload)}`,
 
   return (
     <div className="max-w-[1600px] mx-auto px-6 py-10 space-y-8 relative z-10">
+      <div className="fixed md:hidden right-3 bottom-16 z-[110] flex flex-col gap-2">
+        {([
+          { id: 'p1', label: '검색' },
+          { id: 'p5', label: '대본' },
+          { id: 'p8', label: '이미지' },
+          { id: 'p12', label: '편집' },
+          { id: 'p14', label: '발행' },
+        ] as Array<{ id: keyof typeof ui.panelsOpen; label: string }>).map(item => (
+          <button
+            key={item.id}
+            onClick={() => jumpToPanel(item.id)}
+            className="px-3 py-2 rounded-full bg-black/70 border border-white/20 text-[11px] font-black text-white shadow-lg"
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
       {shouldShowLoginGate && (
         <div className="fixed inset-0 z-[120] bg-[#060b17]/95 backdrop-blur-md flex items-center justify-center p-6">
           <section className="w-full max-w-3xl bg-white/5 border border-white/10 rounded-[2.5rem] p-8">
@@ -7266,16 +7541,40 @@ ${JSON.stringify(cutPayload)}`,
                 <div className="space-y-4">
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest">국가 선택</label>
                   <div className="grid grid-cols-4 gap-2">
-                    {Object.keys(COUNTRY_MAP).map(c => (
+                    {COUNTRY_ORDER.map(c => (
                       <button 
                         key={c}
                         onClick={() => setUi(prev => ({ ...prev, filters: { ...prev.filters, country: c } }))}
                         className={`py-2 rounded-xl text-[11px] font-bold transition-all ${ui.filters.country === c ? 'bg-amber-500 text-black' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
                       >
-                        {c}
+                        {c} <span className="opacity-80">({(searchCacheByCountry[c] || []).length})</span>
                       </button>
                     ))}
                   </div>
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">자동 번역 검색어</label>
+                  <span className="text-[10px] text-slate-500">Gemini 번역 · 국가별 검색에 사용</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {COUNTRY_ORDER.map(country => (
+                    <label key={`tr-${country}`} className="flex items-center gap-2 bg-black/30 border border-white/10 rounded-lg px-2 py-1.5">
+                      <span className="text-[10px] font-black text-amber-200 w-10 shrink-0">{country}</span>
+                      <input
+                        type="text"
+                        value={translatedQueriesByCountry[country] || (country === '한국' ? ui.filters.query : '')}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setTranslatedQueriesByCountry(prev => ({ ...prev, [country]: value }));
+                        }}
+                        className="w-full bg-transparent text-[11px] text-slate-200 outline-none"
+                        placeholder={country === '한국' ? '원문 검색어' : `${country} 자동 번역`}
+                      />
+                    </label>
+                  ))}
                 </div>
               </div>
 
@@ -7322,9 +7621,9 @@ ${JSON.stringify(cutPayload)}`,
                   <label className="text-[10px] font-black text-slate-500 uppercase">검색 개수</label>
                   <input 
                     type="number"
-                    value={ui.filters.count}
-                    onChange={(e) => setUi(prev => ({ ...prev, filters: { ...prev.filters, count: Number(e.target.value) } }))}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs outline-none"
+                    value={50}
+                    disabled
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs outline-none opacity-80"
                   />
                 </div>
               </div>
@@ -7367,7 +7666,7 @@ ${JSON.stringify(cutPayload)}`,
                 disabled={ui.searching}
                 className={`w-full text-black font-black py-4 rounded-2xl shadow-xl active:scale-95 transition-all disabled:opacity-50 ${ui.searching ? 'running-gradient' : 'bg-gradient-to-r from-amber-500 to-yellow-400 shadow-amber-500/20'}`}
               >
-                {ui.searching ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : '유튜브 검색 실행'}
+                {ui.searching ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : '국가별 자동 번역 검색 실행'}
               </button>
             </div>
             </InlineLockedSection>
@@ -7626,6 +7925,17 @@ ${JSON.stringify(cutPayload)}`,
                         <option value="gemini">Gemini TTS</option>
                         <option value="elevenlabs">ElevenLabs TTS</option>
                       </select>
+                      <button
+                        onClick={() => {
+                          const voiceId = ui.autoFlow.fixed.ttsProvider === 'elevenlabs'
+                            ? (ui.autoFlow.fixed.elevenlabsVoice || ui.tts.elevenlabsVoice)
+                            : (ui.autoFlow.fixed.ttsVoice || ui.tts.voice);
+                          void handlePreviewVoice(String(voiceId || ''));
+                        }}
+                        className={`w-full rounded-lg border px-3 py-2 text-[10px] font-black transition-all flex items-center justify-center gap-1 ${previewingId && ((ui.autoFlow.fixed.ttsProvider === 'elevenlabs' && previewingId === (ui.autoFlow.fixed.elevenlabsVoice || ui.tts.elevenlabsVoice)) || (ui.autoFlow.fixed.ttsProvider !== 'elevenlabs' && previewingId === (ui.autoFlow.fixed.ttsVoice || ui.tts.voice))) ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/5 text-slate-200 border-white/15 hover:bg-white/10'}`}
+                      >
+                        <Play className="w-3 h-3" /> TTS 미리듣기
+                      </button>
                     </div>
                     {ui.autoFlow.fixed.ttsProvider === 'gemini' ? (
                       <div className="space-y-2">
@@ -7675,6 +7985,12 @@ ${JSON.stringify(cutPayload)}`,
                           <option key={track.path} value={track.path}>{track.label}</option>
                         ))}
                       </select>
+                      <button
+                        onClick={() => void handlePreviewFixedBgm(String(ui.autoFlow.fixed.bgmTrack || ''))}
+                        className={`w-full rounded-lg border px-3 py-2 text-[10px] font-black transition-all flex items-center justify-center gap-1 ${fixedBgmPreviewing ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/5 text-slate-200 border-white/15 hover:bg-white/10'}`}
+                      >
+                        <Play className="w-3 h-3" /> {fixedBgmPreviewing ? 'BGM 미리듣기 중지' : 'BGM 미리듣기'}
+                      </button>
                     </div>
                   </div>
                 ) : (

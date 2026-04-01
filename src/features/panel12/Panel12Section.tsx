@@ -3,19 +3,33 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Video, Image as ImageIcon, Download, Loader2, Trash2, Play } from 'lucide-react';
 
 const TITLE_FONT_OPTIONS = [
-  '아네모네',
-  'Pretendard',
-  'Noto Sans KR',
-  'Nanum Gothic',
-  'Gowun Dodum',
-  'Nanum Myeongjo',
-  'Nanum Pen Script',
-  'Nanum Brush Script',
+  { value: '아네모네', label: '아네모네 (Anemone)' },
+  { value: 'Pretendard', label: '프리텐다드 (Pretendard)' },
+  { value: 'Noto Sans KR', label: '노토 산스 KR (Noto Sans KR)' },
+  { value: 'Do Hyeon', label: '도현체 (Do Hyeon)' },
+  { value: 'Jua', label: '주아체 (Jua)' },
+  { value: 'Black Han Sans', label: '블랙 한 산스 (Black Han Sans)' },
+  { value: 'Nanum Gothic', label: '나눔고딕 (Nanum Gothic)' },
+  { value: 'Gowun Dodum', label: '고운돋움 (Gowun Dodum)' },
+  { value: 'Gothic A1', label: '고딕 A1 (Gothic A1)' },
+  { value: 'IBM Plex Sans KR', label: 'IBM 플렉스 산스 KR (IBM Plex Sans KR)' },
+  { value: 'Nanum Myeongjo', label: '나눔명조 (Nanum Myeongjo)' },
+  { value: 'Hahmlet', label: '함렛 (Hahmlet)' },
+  { value: 'Nanum Pen Script', label: '나눔펜체 (Nanum Pen Script)' },
+  { value: 'Nanum Brush Script', label: '나눔붓글씨 (Nanum Brush Script)' },
 ];
 
 const TEXT_SCALE_MIN = 0.7;
 const TEXT_SCALE_MAX = 2.2;
 const MM_TO_PX_1080 = 3.7795275591;
+
+const SUBTITLE_STYLE_SWATCH: Record<string, string> = {
+  shorts: 'from-amber-400 to-orange-500',
+  docu: 'from-slate-400 to-slate-600',
+  lecture: 'from-sky-400 to-blue-500',
+  impact: 'from-rose-500 to-red-600',
+  neon: 'from-cyan-400 to-indigo-500',
+};
 
 const mmToPxScaled = (mm: number, width: number) => mm * MM_TO_PX_1080 * (width / 1080);
 
@@ -60,19 +74,12 @@ const splitTitlePreviewLines = (text: string) => {
     .map(line => normalizeSubtitleText(line))
     .filter(Boolean);
   if (manualLines.length > 0) {
-    return manualLines.slice(0, 2).map(line => Array.from(line).slice(0, 10).join(''));
+    return manualLines.slice(0, 2);
   }
 
   const compact = normalizeSubtitleText(text);
   if (!compact) return [] as string[];
-  const chars = Array.from(compact);
-  const lines: string[] = [];
-  let cursor = 0;
-  while (cursor < chars.length && lines.length < 2) {
-    lines.push(chars.slice(cursor, cursor + 10).join('').trim());
-    cursor += 10;
-  }
-  return lines.filter(Boolean);
+  return [compact];
 };
 
 type Props = {
@@ -220,9 +227,11 @@ export default function Panel12Section(props: Props) {
   }, []);
 
   const previewTitleFontPx = React.useMemo(() => {
-    const renderFontAt1080 = Math.max(16, 18 * Math.max(TEXT_SCALE_MIN, Math.min(TEXT_SCALE_MAX, Number(ui.finalVideo.templateTitleScale || 1))));
-    return Math.max(8, renderFontAt1080 * (previewFrameWidth / 1080));
-  }, [previewFrameWidth, ui.finalVideo.templateTitleScale]);
+    const preset = SUBTITLE_PRESETS[ui.finalVideo.subtitlePreset] as any;
+    const baseScale = Number(preset?.fontScale || 0.048);
+    const titleScale = Math.max(TEXT_SCALE_MIN, Math.min(TEXT_SCALE_MAX, Number(ui.finalVideo.templateTitleScale || 1)));
+    return Math.max(10, Math.round(previewFrameWidth * baseScale * titleScale));
+  }, [previewFrameWidth, ui.finalVideo.templateTitleScale, ui.finalVideo.subtitlePreset, SUBTITLE_PRESETS]);
 
   const previewSubtitleFontPx = React.useMemo(() => {
     const preset = SUBTITLE_PRESETS[ui.finalVideo.subtitlePreset] as any;
@@ -248,6 +257,12 @@ export default function Panel12Section(props: Props) {
     const topPx = mmToPxScaled(topMm, previewFrameWidth);
     return Math.max(1, Math.min(95, (topPx / Math.max(1, previewHeight)) * 100));
   }, [previewFrameWidth, ui.finalVideo.templateTitleLine1TopMm]);
+
+  const jumpToEditorSection = (id: string) => {
+    const target = document.getElementById(id);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   const stopPreviewAudio = React.useCallback(() => {
     if (!previewAudioRef.current) return;
@@ -337,6 +352,14 @@ export default function Panel12Section(props: Props) {
             <p className="text-[11px] font-black text-white uppercase tracking-widest">최적 제작 순서 가이드 (고정)</p>
             <p className="text-[12px] text-white mt-1 font-semibold">1) 컷 이미지 준비 → 2) 초반 훅 컷 영상 업로드 → 3) 영상 훅 컷 수 지정 → 4) 슬라이드 구성 → 5) 렌더링/MP4 변환</p>
             <p className="text-[10px] text-emerald-50 mt-1">권장: 쇼츠는 훅 5~7컷, 컷당 2~4초, TTS 완료 후 렌더링</p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+            <p className="text-[10px] font-black text-emerald-200 uppercase tracking-widest mb-2">편집 섹션 바로가기</p>
+            <div className="grid grid-cols-3 gap-2">
+              <button onClick={() => jumpToEditorSection('panel12-title')} className="rounded-lg bg-white/10 border border-white/15 py-1.5 text-[10px] font-black text-white">제목</button>
+              <button onClick={() => jumpToEditorSection('panel12-subtitle')} className="rounded-lg bg-white/10 border border-white/15 py-1.5 text-[10px] font-black text-white">자막</button>
+              <button onClick={() => jumpToEditorSection('panel12-render')} className="rounded-lg bg-white/10 border border-white/15 py-1.5 text-[10px] font-black text-white">렌더</button>
+            </div>
           </div>
           <div className="rounded-2xl border border-amber-300/40 bg-amber-500/10 px-4 py-3 space-y-3">
             <p className="text-[11px] font-black text-amber-100 uppercase tracking-widest">오디오 빠른 미리듣기 (항상 표시)</p>
@@ -668,7 +691,7 @@ export default function Panel12Section(props: Props) {
                             }}
                           />
                         </label>
-                        <div className="space-y-2 pt-2 border-t border-white/10">
+                        <div id="panel12-title" className="space-y-2 pt-2 border-t border-white/10">
                           <div className="flex items-center justify-between gap-2">
                             <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">템플릿 제목 오버레이</label>
                             <button
@@ -680,20 +703,19 @@ export default function Panel12Section(props: Props) {
                           </div>
                           {ui.finalVideo.templateTitleEnabled && (
                             <>
-                                <input
+                                <textarea
                                   value={ui.finalVideo.templateTitleText}
                                   onChange={(e) => {
                                     setTemplateTitleManualEdited(true);
-                                    const compact = Array.from(String(e.target.value || '').replace(/\r?\n/g, ' ').trim()).slice(0, 20).join('');
-                                    setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleText: compact } }));
+                                    const nextTitle = String(e.target.value || '');
+                                    setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleText: nextTitle } }));
                                   }}
                                   placeholder="템플릿 스타일로 넣을 제목"
-                                  className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
-                                  maxLength={20}
+                                  className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none min-h-[56px] resize-y"
                                 />
                               {templateTitleManualEdited && (
                                 <p className="text-[10px] text-amber-200/95 bg-amber-500/10 border border-amber-300/25 rounded-md px-2 py-1">
-                                  수동 수정됨: 자동 제목 덮어쓰기는 템플릿을 다시 클릭할 때만 실행됩니다.
+                                  수정됨
                                 </p>
                               )}
                               <button
@@ -701,7 +723,7 @@ export default function Panel12Section(props: Props) {
                                 disabled={ui.finalVideo.templateTitleGenerating || !ui.selectedHookTitle}
                                 className={`w-full py-2 rounded-lg text-[10px] font-black border transition-all ${ui.finalVideo.templateTitleGenerating ? 'running-gradient text-black' : 'bg-amber-500/80 text-black border-amber-300/40'} disabled:opacity-40`}
                               >
-                                {ui.finalVideo.templateTitleGenerating ? '재작성 중지' : '바이럴 제목으로 재작성'}
+                                {ui.finalVideo.templateTitleGenerating ? '적용 중' : '선택 제목 그대로 적용'}
                               </button>
                               <div className="grid grid-cols-2 gap-2">
                                 <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
@@ -751,7 +773,7 @@ export default function Panel12Section(props: Props) {
                                     className="w-28 bg-transparent text-right outline-none"
                                   >
                                     {TITLE_FONT_OPTIONS.map(font => (
-                                      <option key={font} value={font}>{font}</option>
+                                      <option key={font.value} value={font.value}>{font.label}</option>
                                     ))}
                                   </select>
                                 </label>
@@ -774,19 +796,30 @@ export default function Panel12Section(props: Props) {
                                     max="80"
                                     step="1"
                                     value={ui.finalVideo.templateTitleLine1TopMm}
-                                    onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleLine1TopMm: Number(e.target.value) } }))}
+                                    onChange={(e) => {
+                                      const line1 = Math.max(5, Math.min(80, Number(e.target.value) || 60));
+                                      const autoLine2 = Math.max(20, Math.min(120, Math.round(line1 * 1.6)));
+                                      setUi((prev: any) => ({
+                                        ...prev,
+                                        finalVideo: {
+                                          ...prev.finalVideo,
+                                          templateTitleLine1TopMm: line1,
+                                          templateTitleLine2BottomMm: autoLine2,
+                                        },
+                                      }));
+                                    }}
                                     className="w-14 bg-transparent text-right outline-none"
                                   />
                                 </label>
                                 <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
-                                  2줄 하단(mm)
+                                  2줄 하단(mm, 자동)
                                   <input
                                     type="number"
                                     min="20"
                                     max="120"
                                     step="1"
                                     value={ui.finalVideo.templateTitleLine2BottomMm}
-                                    onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleLine2BottomMm: Number(e.target.value) } }))}
+                                    readOnly
                                     className="w-14 bg-transparent text-right outline-none"
                                   />
                                 </label>
@@ -838,20 +871,7 @@ export default function Panel12Section(props: Props) {
                           </div>
                         )}
                       </div>
-                      <div className="flex items-center justify-between gap-3 pt-1">
-                        <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">줄당 글자수</label>
-                        <span className="text-[10px] text-emerald-100 font-bold">{ui.finalVideo.subtitleMaxChars}자</span>
-                      </div>
-                      <p className="text-[10px] text-slate-400">줄당 글자수는 자막 한 줄에서 허용할 최대 문자 수입니다. (제목 길이 설정 아님)</p>
-                      <InlineSmoothRange
-                        min={14}
-                        max={34}
-                        step={1}
-                        value={Number(ui.finalVideo.subtitleMaxChars || 24)}
-                        onChange={(v) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitleMaxChars: Number(v) } }))}
-                        className="w-full accent-emerald-300"
-                      />
-                      <div className="flex items-center justify-between gap-3 pt-1">
+                      <div id="panel12-subtitle" className="flex items-center justify-between gap-3 pt-1">
                         <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">자막 글자 크기</label>
                         <span className="text-[10px] text-emerald-100 font-bold">{Number(ui.finalVideo.subtitleScale || 1).toFixed(2)}x</span>
                       </div>
@@ -887,15 +907,20 @@ export default function Panel12Section(props: Props) {
                       </div>
                       <div className="flex items-center justify-between gap-3 pt-1">
                         <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">자막 스타일</label>
-                        <select
-                          value={ui.finalVideo.subtitlePreset}
-                          onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitlePreset: e.target.value as any } }))}
-                          className="bg-slate-800 border border-white/10 rounded-lg px-3 py-1.5 text-[10px] text-white outline-none"
-                        >
-                          {Object.entries(SUBTITLE_PRESETS).map(([id, preset]) => (
-                            <option key={id} value={id}>{preset.label}</option>
-                          ))}
-                        </select>
+                        <span className="text-[10px] text-emerald-100 font-bold">{SUBTITLE_PRESETS?.[ui.finalVideo.subtitlePreset]?.label || '기본'}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {Object.entries(SUBTITLE_PRESETS).map(([id, preset]) => (
+                          <button
+                            key={id}
+                            onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitlePreset: id as any } }))}
+                            className={`rounded-lg border px-2 py-2 text-left transition-all ${ui.finalVideo.subtitlePreset === id ? 'border-emerald-300 bg-emerald-500/15' : 'border-white/10 bg-black/20 hover:bg-white/5'}`}
+                          >
+                            <div className={`h-2 w-full rounded-full bg-gradient-to-r ${SUBTITLE_STYLE_SWATCH[id] || 'from-slate-500 to-slate-700'}`} />
+                            <p className="mt-1 text-[10px] font-black text-white">{preset.label}</p>
+                            <p className="text-[9px] text-slate-300 mt-0.5 line-clamp-1">{PRESET_SAMPLE_TEXT[id as keyof typeof PRESET_SAMPLE_TEXT]}</p>
+                          </button>
+                        ))}
                       </div>
                       <p className="text-[10px] text-slate-400">단어 하이라이트/키워드 강조 기능은 혼란을 줄이기 위해 비활성화되었습니다.</p>
                       <div className="flex items-center justify-between gap-3 pt-1">
@@ -949,7 +974,7 @@ export default function Panel12Section(props: Props) {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div id="panel12-render" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button
                   onClick={handleGenerateFinalVideo}
                   disabled={ui.finalVideo.generating || ui.imageJobs.filter((j: any) => j.imageUrl).length === 0}
