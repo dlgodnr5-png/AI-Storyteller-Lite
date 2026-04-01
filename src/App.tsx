@@ -1916,6 +1916,7 @@ export default function App() {
   const [flashNotice, setFlashNotice] = useState<{ text: string; tone: 'info' | 'error' | 'success' } | null>(null);
   const flashTimerRef = useRef<number | null>(null);
   const [resumeSnapshot, setResumeSnapshot] = useState<any>(null);
+  const [autoDoneModalText, setAutoDoneModalText] = useState<string>('');
   const [loginGateDismissed, setLoginGateDismissed] = useState<boolean>(() => {
     try {
       return sessionStorage.getItem('ai_storyteller_login_gate_dismissed') === '1';
@@ -1990,6 +1991,8 @@ export default function App() {
   );
   const currentAutoStep = ui.autoFlow.running ? ui.autoFlow.step : ui.productPromo.running ? ui.productPromo.step : '';
   const currentAutoTitle = ui.autoFlow.running ? ui.autoFlow.lastTitle : ui.productPromo.running ? '상품홍보 원클릭' : '';
+  const isGeminiTtsGenerating = ui.tts.generating && String(ui.tts.status || '').includes('Gemini');
+  const isElevenTtsGenerating = ui.tts.generating && String(ui.tts.status || '').includes('ElevenLabs');
   const productPromoPlan = useMemo(() => resolveProductPromoPlan(ui.productPromo), [ui.productPromo]);
 
   useEffect(() => {
@@ -3499,7 +3502,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       }
 
       const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
+      const url = await blobToDataUrl(blob);
       setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: false, audioUrl: url, status: 'ElevenLabs 완료' } }));
     } catch (err) {
       console.error(err);
@@ -4064,7 +4067,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       if (opts?.productMode) {
         const measured = Math.max(0, Number(latestUiRef.current?.tts?.measuredDuration || 0));
         if (measured > 0) {
-          const ttsBasedCuts = Math.max(3, Math.min(24, Math.ceil(measured / IMAGE_SLIDE_DURATION_SEC)));
+          const ttsBasedCuts = Math.max(3, Math.min(24, Math.round(measured / IMAGE_SLIDE_DURATION_SEC)));
           setUi(prev => ({
             ...prev,
             productPromo: {
@@ -4090,7 +4093,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       if (opts?.productMode) {
         const measured = Math.max(0, Number(latestUiRef.current?.tts?.measuredDuration || 0));
         const ttsBasedCuts = measured > 0
-          ? Math.max(3, Math.min(24, Math.ceil(measured / IMAGE_SLIDE_DURATION_SEC)))
+          ? Math.max(3, Math.min(24, Math.round(measured / IMAGE_SLIDE_DURATION_SEC)))
           : Math.max(3, Math.min(24, Number(opts?.productTargetCuts ?? latestUiRef.current?.productPromo?.targetCuts ?? 7)));
         const balanced = rebalanceCutsToTarget([...(latestUiRef.current?.cuts?.items || [])], ttsBasedCuts);
         const compact = compactCutsToMax(balanced, ttsBasedCuts);
@@ -4187,11 +4190,37 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, running: false, step: '12단계 완료', error: '' } }));
       appendAutoLog('자동 진행 12단계 완료 (최종 렌더/발행은 수동 확인)');
       showNotice('자동 진행 12단계 완료: 13번 편집 후 14번 발행하세요.', 'success');
+      if (!opts?.productMode) {
+        setAutoDoneModalText('자동 제작이 완료되었습니다. 최종영상을 확인하세요.');
+      }
       await persistAutoSnapshot(8, 'done');
       await clearAutoSnapshot();
       return true;
     } catch (err: any) {
       console.error(err);
+      const hasSlides = Array.isArray(latestUiRef.current?.finalVideo?.slides) && latestUiRef.current.finalVideo.slides.length > 0;
+      const hasImageJobs = Array.isArray(latestUiRef.current?.imageJobs) && latestUiRef.current.imageJobs.some((j: any) => Boolean(j?.imageUrl));
+      const hasTts = Boolean(latestUiRef.current?.tts?.audioUrl);
+      const hasRenderableOutput = hasSlides || hasImageJobs;
+      const canSoftRecover = hasRenderableOutput && (hasTts || Boolean(opts?.productMode));
+
+      if (canSoftRecover) {
+        setUi(prev => ({
+          ...prev,
+          autoFlow: {
+            ...prev.autoFlow,
+            running: false,
+            step: '12단계 완료(경고)',
+            error: '',
+          },
+        }));
+        appendAutoLog('자동 진행 경고 종료: 일부 단계 오류가 있었지만 생성 결과를 유지합니다.');
+        showNotice('일부 단계 경고가 있었지만 생성 결과를 유지했습니다. 12~14번에서 최종 확인해 주세요.', 'info', 1400);
+        await persistAutoSnapshot(8, 'done');
+        await clearAutoSnapshot();
+        return true;
+      }
+
       const normalizeAutoFlowError = (message: string) => {
         if (!message) return '자동 제작 중 오류가 발생했습니다.';
         if (message.includes('대본')) return '대본 생성에 실패했습니다. 제목/키워드를 바꿔 다시 시도해 주세요.';
@@ -4238,12 +4267,36 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
   const resumeFromSnapshot = async () => {
     const snap = resumeSnapshot;
     if (!snap) return;
+    const snapUi = snap.ui || {};
+    const snapTtsAudioUrl = String(snapUi?.tts?.audioUrl || '').trim();
+    const hasUsableTtsAudio = Boolean(snapTtsAudioUrl) && !snapTtsAudioUrl.startsWith('blob:');
+    let safeResumeStep = Math.max(1, Number(snap.step || 1));
+    if (!String(snapUi?.script?.output || '').trim()) safeResumeStep = Math.min(safeResumeStep, 2);
+    if (!hasUsableTtsAudio || Number(snapUi?.tts?.measuredDuration || 0) <= 0) safeResumeStep = Math.min(safeResumeStep, 3);
+    if (!Array.isArray(snapUi?.cuts?.items) || snapUi.cuts.items.length === 0) safeResumeStep = Math.min(safeResumeStep, 4);
+    if (!Array.isArray(snapUi?.cuts?.prompts) || snapUi.cuts.prompts.length === 0) safeResumeStep = Math.min(safeResumeStep, 5);
+    if (!Array.isArray(snapUi?.imageJobs) || !snapUi.imageJobs.some((j: any) => Boolean(j?.imageUrl))) safeResumeStep = Math.min(safeResumeStep, 6);
+    if (!Array.isArray(snapUi?.finalVideo?.slides) || snapUi.finalVideo.slides.length === 0) safeResumeStep = Math.min(safeResumeStep, 7);
+
     setUi(prev => ({
       ...prev,
-      ...(snap.ui || {}),
+      ...snapUi,
+      tts: {
+        ...prev.tts,
+        ...(snapUi?.tts || {}),
+        generating: false,
+        status: hasUsableTtsAudio ? String(snapUi?.tts?.status || '').replace('생성 중...', '완료') : '복구: TTS 재생성 필요',
+        audioUrl: hasUsableTtsAudio ? snapTtsAudioUrl : '',
+        measuredDuration: hasUsableTtsAudio ? Number(snapUi?.tts?.measuredDuration || 0) : 0,
+      },
       autoFlow: {
         ...prev.autoFlow,
-        ...(snap.ui?.autoFlow || {}),
+        ...(snapUi?.autoFlow || {}),
+        running: false,
+      },
+      productPromo: {
+        ...prev.productPromo,
+        ...(snapUi?.productPromo || {}),
         running: false,
       },
     }));
@@ -4251,7 +4304,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
     await new Promise(r => setTimeout(r, 0));
     void runOneClickFromTitle(snap.title || latestUiRef.current?.selectedHookTitle || '', {
       ...(snap.options || {}),
-      resumeFromStep: Number(snap.step || 1),
+      resumeFromStep: safeResumeStep,
     });
   };
 
@@ -4617,6 +4670,7 @@ JSON만 반환:
         },
       }));
       appendAutoLog('상품홍보 원클릭 완료');
+      setAutoDoneModalText('자동 제작이 완료되었습니다. 최종영상을 확인하세요.');
 
       if (latestUiRef.current?.productPromo?.autoQueuePublish) {
         const scheduleMinutes = [30, 60, 120].includes(Number(latestUiRef.current?.productPromo?.autoScheduleMinutes))
@@ -4646,7 +4700,7 @@ JSON만 반환:
         },
       }));
       appendAutoLog('상품홍보 원클릭 실패: 자동 제작 오류');
-      alert('상품 자동 제작에 실패했습니다. 다시 시도해 주세요.');
+      showNotice('상품 자동 제작에 실패했습니다. 다시 시도해 주세요.', 'error');
     }
   };
 
@@ -7504,6 +7558,18 @@ ${JSON.stringify(cutPayload)}`,
         </div>
       )}
 
+      {autoDoneModalText && (
+        <div className="fixed inset-0 z-[146] bg-black/65 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl border border-emerald-300/30 bg-[#0b1325] p-5 space-y-3">
+            <h4 className="text-sm font-black text-emerald-200">자동 제작 완료</h4>
+            <p className="text-xs text-slate-300">{autoDoneModalText}</p>
+            <div className="flex justify-end">
+              <button onClick={() => setAutoDoneModalText('')} className="px-3 py-2 rounded-lg bg-emerald-400 text-black text-xs font-black">OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <main className="max-w-5xl mx-auto space-y-8">
         {/* 1. 유튜브 검색 */}
         <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl">
@@ -8477,10 +8543,10 @@ ${JSON.stringify(cutPayload)}`,
                     <div className="flex flex-col justify-end gap-3">
                       <button 
                         onClick={handleGenerateGeminiTTS}
-                        disabled={!ui.script.output}
-                        className={`w-full text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${ui.tts.generating ? 'running-gradient' : 'bg-cyan-500 hover:bg-cyan-600'}`}
+                        disabled={!ui.script.output || (ui.tts.generating && !isGeminiTtsGenerating)}
+                        className={`w-full text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${isGeminiTtsGenerating ? 'running-gradient' : 'bg-cyan-500 hover:bg-cyan-600'}`}
                       >
-                        {ui.tts.generating ? <><Loader2 className="w-5 h-5 animate-spin" /> 중지</> : <><Volume2 className="w-5 h-5" /> Gemini TTS 생성</>}
+                        {isGeminiTtsGenerating ? <><Loader2 className="w-5 h-5 animate-spin" /> 중지</> : <><Volume2 className="w-5 h-5" /> Gemini TTS 생성</>}
                       </button>
                     </div>
                   </div>
@@ -8544,10 +8610,10 @@ ${JSON.stringify(cutPayload)}`,
                     <div className="flex flex-col justify-end gap-3">
                       <button
                         onClick={handleGenerateElevenLabsTTS}
-                        disabled={!ui.script.output}
-                        className={`w-full text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${ui.tts.generating ? 'running-gradient' : 'bg-indigo-500 hover:bg-indigo-600'}`}
+                        disabled={!ui.script.output || (ui.tts.generating && !isElevenTtsGenerating)}
+                        className={`w-full text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${isElevenTtsGenerating ? 'running-gradient' : 'bg-indigo-500 hover:bg-indigo-600'}`}
                       >
-                        {ui.tts.generating ? <><Loader2 className="w-5 h-5 animate-spin" /> 중지</> : <><Volume2 className="w-5 h-5" /> ElevenLabs TTS 생성</>}
+                        {isElevenTtsGenerating ? <><Loader2 className="w-5 h-5 animate-spin" /> 중지</> : <><Volume2 className="w-5 h-5" /> ElevenLabs TTS 생성</>}
                       </button>
                     </div>
                   </div>
@@ -8630,15 +8696,15 @@ ${JSON.stringify(cutPayload)}`,
                 </div>
                 <div className="bg-black/30 border border-white/10 rounded-xl px-3 py-2">
                   <p className="text-slate-400">TTS 실측</p>
-                  <p className="text-cyan-300 font-black">{timingSummary.ttsSec > 0 ? `${Math.ceil(timingSummary.ttsSec)}초` : '미생성'}</p>
+                  <p className="text-cyan-300 font-black">{timingSummary.ttsSec > 0 ? `${timingSummary.ttsSec.toFixed(1)}초` : '미생성'}</p>
                 </div>
                 <div className="bg-black/30 border border-white/10 rounded-xl px-3 py-2">
                   <p className="text-slate-400">컷 길이</p>
-                  <p className="text-emerald-300 font-black">{Math.ceil(timingSummary.cutsSec)}초</p>
+                  <p className="text-emerald-300 font-black">{timingSummary.cutsSec.toFixed(1)}초</p>
                 </div>
                 <div className="bg-black/30 border border-white/10 rounded-xl px-3 py-2">
                   <p className="text-slate-400">최종 기준</p>
-                  <p className="text-white font-black">{Math.ceil(timingSummary.effectiveSec)}초</p>
+                  <p className="text-white font-black">{timingSummary.effectiveSec.toFixed(1)}초</p>
                 </div>
               </div>
 

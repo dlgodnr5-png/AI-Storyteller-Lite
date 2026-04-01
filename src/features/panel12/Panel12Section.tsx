@@ -1084,19 +1084,19 @@ export default function Panel12Section(props: Props) {
                 </div>
                 <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">
                   <p className="text-slate-400">TTS 실측</p>
-                  <p className="font-black text-cyan-300">{syncReport.ttsSec > 0 ? `${Math.ceil(syncReport.ttsSec)}초` : '미생성'}</p>
+                  <p className="font-black text-cyan-300">{syncReport.ttsSec > 0 ? `${syncReport.ttsSec.toFixed(1)}초` : '미생성'}</p>
                 </div>
                 <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">
                   <p className="text-slate-400">컷 총길이</p>
-                  <p className="font-black text-emerald-300">{Math.ceil(syncReport.cutsSec)}초</p>
+                  <p className="font-black text-emerald-300">{syncReport.cutsSec.toFixed(1)}초</p>
                 </div>
                 <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">
                   <p className="text-slate-400">렌더 기준</p>
-                  <p className="font-black text-white">{Math.ceil(syncReport.renderSec)}초</p>
+                  <p className="font-black text-white">{syncReport.renderSec.toFixed(1)}초</p>
                 </div>
                 <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">
                   <p className="text-slate-400">자막 마지막</p>
-                  <p className="font-black text-white">{Math.ceil(syncReport.srtLastEndSec)}초</p>
+                  <p className="font-black text-white">{syncReport.srtLastEndSec.toFixed(1)}초</p>
                 </div>
                 <div className={`border rounded-lg px-3 py-2 ${syncReport.status === '정상' ? 'bg-emerald-500/10 border-emerald-300/30' : syncReport.status === '주의' ? 'bg-amber-500/10 border-amber-300/30' : 'bg-rose-500/10 border-rose-300/30'}`}>
                   <p className="text-slate-300">싱크 오차</p>
