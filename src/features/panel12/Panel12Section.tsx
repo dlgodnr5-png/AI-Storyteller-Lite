@@ -213,6 +213,7 @@ export default function Panel12Section(props: Props) {
   const [previewAudioType, setPreviewAudioType] = React.useState<'' | 'bgm' | 'sfx'>('');
   const [previewGuideMode, setPreviewGuideMode] = React.useState<'shorts' | 'reels' | 'tiktok'>('shorts');
   const [previewFrameWidth, setPreviewFrameWidth] = React.useState(360);
+  const [selectedSlotCut, setSelectedSlotCut] = React.useState<number | null>(null);
   const previewTemplate = BUILTIN_SUBTITLE_TEMPLATES.find(t => t.id === previewTemplateId) || BUILTIN_SUBTITLE_TEMPLATES[0];
   const maxHookVideoCount = Math.max(1, ui.cuts.items?.length || 1);
   const resolvedBgmTrack = String(
@@ -267,6 +268,62 @@ export default function Panel12Section(props: Props) {
     const target = document.getElementById(id);
     if (!target) return;
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const cutSlots = React.useMemo(() => {
+    const cutsLen = Math.max(1, Number(ui.cuts.items?.length || 0));
+    return Array.from({ length: cutsLen }, (_, idx) => {
+      const cut = idx + 1;
+      const existingSlide = (ui.finalVideo.slides || []).find((s: any) => Number(s.cut) === cut);
+      const imageJob = (ui.imageJobs || []).find((j: any) => Number(j.cut) === cut && j.imageUrl);
+      return {
+        cut,
+        imageUrl: String(existingSlide?.imageUrl || imageJob?.imageUrl || ''),
+        motion: existingSlide?.motion || 'zoom_in',
+      };
+    });
+  }, [ui.cuts.items, ui.finalVideo.slides, ui.imageJobs]);
+
+  const assignImageToCut = (targetCut: number, sourceCut: number, imageUrl: string) => {
+    if (!imageUrl) return;
+    if (targetCut !== sourceCut) {
+      alert('싱크된 컷 번호에만 이미지를 넣을 수 있습니다. 다른 칸에는 삽입할 수 없습니다.');
+      return;
+    }
+    setUi((prev: any) => {
+      const prevSlides = Array.isArray(prev.finalVideo.slides) ? [...prev.finalVideo.slides] : [];
+      const idx = prevSlides.findIndex((s: any) => Number(s.cut) === targetCut);
+      const base = idx >= 0 ? prevSlides[idx] : { cut: targetCut, motion: 'zoom_in', mediaType: 'image', duration: Number(prev.finalVideo.slideDuration || 4) };
+      const nextSlide = {
+        ...base,
+        cut: targetCut,
+        imageUrl,
+        mediaType: 'image',
+        videoUrl: '',
+        videoDurationSec: 0,
+      };
+      if (idx >= 0) prevSlides[idx] = nextSlide;
+      else prevSlides.push(nextSlide);
+      prevSlides.sort((a: any, b: any) => Number(a.cut || 0) - Number(b.cut || 0));
+      return {
+        ...prev,
+        finalVideo: {
+          ...prev.finalVideo,
+          slides: prevSlides,
+        },
+      };
+    });
+  };
+
+  const clearCutSlot = (cut: number) => {
+    setUi((prev: any) => ({
+      ...prev,
+      finalVideo: {
+        ...prev.finalVideo,
+        slides: (prev.finalVideo.slides || []).filter((s: any) => Number(s.cut) !== cut),
+      },
+    }));
+    if (selectedSlotCut === cut) setSelectedSlotCut(null);
   };
 
   const stopPreviewAudio = React.useCallback(() => {
@@ -971,6 +1028,41 @@ export default function Panel12Section(props: Props) {
                 </div>
               )}
 
+              {ui.finalVideo.type === 'image_slide' && (
+                <div className="space-y-3 bg-black/30 border border-white/10 rounded-2xl p-4">
+                  <p className="text-[10px] font-black text-amber-200 uppercase tracking-widest">컷 번호 고정 이미지 슬롯 (싱크 보호)</p>
+                  <p className="text-[10px] text-slate-400">각 CUT 번호 칸에서만 교체/삭제 가능합니다. 다른 CUT 이미지 삽입 시 오류가 발생합니다.</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
+                    {cutSlots.map((slot: any) => (
+                      <button
+                        key={`slot-${slot.cut}`}
+                        onClick={() => setSelectedSlotCut(slot.cut)}
+                        className={`rounded-lg border p-2 text-left transition-all ${selectedSlotCut === slot.cut ? 'border-amber-300 bg-amber-500/10' : 'border-white/10 bg-black/20 hover:bg-white/5'}`}
+                      >
+                        <p className="text-[10px] font-black text-emerald-300">CUT {slot.cut}</p>
+                        {slot.imageUrl ? (
+                          <img src={slot.imageUrl} alt={`slot-${slot.cut}`} className="mt-1 h-16 w-full object-cover rounded-md border border-white/10" />
+                        ) : (
+                          <div className="mt-1 h-16 w-full rounded-md border border-dashed border-white/15 flex items-center justify-center text-[10px] text-slate-500">빈 슬롯</div>
+                        )}
+                        <div className="mt-2 flex gap-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              clearCutSlot(slot.cut);
+                            }}
+                            className="flex-1 rounded-md border border-rose-300/30 bg-rose-500/10 text-[10px] font-black text-rose-200 py-1"
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="text-[10px] text-slate-400">{selectedSlotCut ? `현재 선택 슬롯: CUT ${selectedSlotCut}` : '먼저 슬롯을 선택한 뒤 아래 이미지 풀에서 같은 CUT 이미지를 클릭하세요.'}</div>
+                </div>
+              )}
+
               <div id="panel12-render" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button
                   onClick={handleGenerateFinalVideo}
@@ -1288,13 +1380,24 @@ export default function Panel12Section(props: Props) {
               )}
 
               <div className="w-full flex gap-2 overflow-x-auto py-2 custom-scrollbar">
-                {(ui.finalVideo.type === 'image_slide' && ui.finalVideo.slides.length > 0
-                  ? ui.finalVideo.slides
-                  : ui.imageJobs.filter((j: any) => j.imageUrl)
-                ).map((job: any, i: number) => (
-                  <img key={i} src={job.imageUrl} style={{ aspectRatio: ratioToCss(ui.cuts.ratio || '16:9') }} className={`h-16 object-cover rounded-lg border shrink-0 ${ui.finalVideo.type === 'image_slide' && i === ui.finalVideo.activeSlide ? 'border-emerald-400' : 'border-white/10'}`} alt="" />
+                {(ui.imageJobs || []).filter((j: any) => j.imageUrl).map((job: any, i: number) => (
+                  <button
+                    key={`pool-${job.cut}-${i}`}
+                    onClick={() => {
+                      if (!selectedSlotCut) {
+                        alert('먼저 상단에서 CUT 슬롯을 선택해 주세요.');
+                        return;
+                      }
+                      assignImageToCut(Number(selectedSlotCut), Number(job.cut || 0), String(job.imageUrl || ''));
+                    }}
+                    className={`relative h-16 rounded-lg border shrink-0 overflow-hidden ${selectedSlotCut === Number(job.cut || 0) ? 'border-emerald-400' : 'border-white/10'}`}
+                    title={`CUT ${job.cut} 이미지`}
+                  >
+                    <img src={job.imageUrl} style={{ aspectRatio: ratioToCss(ui.cuts.ratio || '16:9') }} className="h-16 object-cover" alt="" />
+                    <span className="absolute left-1 top-1 text-[9px] font-black px-1 py-0.5 rounded bg-black/70 text-emerald-300">CUT {job.cut}</span>
+                  </button>
                 ))}
-                {(ui.finalVideo.type === 'image_slide' ? ui.finalVideo.slides.length === 0 : ui.imageJobs.filter((j: any) => j.imageUrl).length === 0) && (
+                {ui.imageJobs.filter((j: any) => j.imageUrl).length === 0 && (
                   <div className="w-full h-16 border border-dashed border-white/10 rounded-lg flex items-center justify-center text-[10px] text-slate-600">이미지가 없습니다.</div>
                 )}
               </div>

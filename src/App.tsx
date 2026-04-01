@@ -960,14 +960,16 @@ const resolveProductPromoPlan = (productPromo: any) => {
   const manualHookVideoCount = Number(productPromo?.manualHookVideoCount || 1) >= 2 ? 2 : 1;
 
   if (workflowMode === 'auto') {
+    const targetCuts = Math.max(3, Math.min(24, Number(productPromo?.targetCuts || 7)));
+    const targetSeconds = targetCuts * IMAGE_SLIDE_DURATION_SEC;
     return {
       workflowMode,
       renderMode: 'image_slide' as const,
-      targetCuts: 7,
+      targetCuts,
       hookVideoCount: 0,
       slideDuration: IMAGE_SLIDE_DURATION_SEC,
-      targetSeconds: 7 * IMAGE_SLIDE_DURATION_SEC,
-      scriptLength: `${7 * IMAGE_SLIDE_DURATION_SEC}초`,
+      targetSeconds,
+      scriptLength: `${targetSeconds}초`,
     };
   }
 
@@ -4191,7 +4193,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       appendAutoLog('자동 진행 12단계 완료 (최종 렌더/발행은 수동 확인)');
       showNotice('자동 진행 12단계 완료: 13번 편집 후 14번 발행하세요.', 'success');
       if (!opts?.productMode) {
-        setAutoDoneModalText('자동 제작이 완료되었습니다. 최종영상을 확인하세요.');
+        setAutoDoneModalText('자동 제작이 완료되었습니다. 12번으로 이동해 수정사항이 없으면 [슬라이드 구성]을 클릭하세요.');
       }
       await persistAutoSnapshot(8, 'done');
       await clearAutoSnapshot();
@@ -4670,7 +4672,7 @@ JSON만 반환:
         },
       }));
       appendAutoLog('상품홍보 원클릭 완료');
-      setAutoDoneModalText('자동 제작이 완료되었습니다. 최종영상을 확인하세요.');
+      setAutoDoneModalText('자동 제작이 완료되었습니다. 12번으로 이동해 수정사항이 없으면 [슬라이드 구성]을 클릭하세요.');
 
       if (latestUiRef.current?.productPromo?.autoQueuePublish) {
         const scheduleMinutes = [30, 60, 120].includes(Number(latestUiRef.current?.productPromo?.autoScheduleMinutes))
