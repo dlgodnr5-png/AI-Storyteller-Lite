@@ -215,6 +215,11 @@ export default function Panel12Section(props: Props) {
   const [previewFrameWidth, setPreviewFrameWidth] = React.useState(360);
   const previewTemplate = BUILTIN_SUBTITLE_TEMPLATES.find(t => t.id === previewTemplateId) || BUILTIN_SUBTITLE_TEMPLATES[0];
   const maxHookVideoCount = Math.max(1, ui.cuts.items?.length || 1);
+  const resolvedBgmTrack = String(
+    (isOneClickFixed ? (ui.autoFlow?.fixed?.bgmTrack || '') : '') ||
+    ui.finalVideo.bgmTrack ||
+    '',
+  );
 
   React.useEffect(() => {
     if (!previewFrameRef.current) return;
@@ -351,7 +356,7 @@ export default function Panel12Section(props: Props) {
           <div className="rounded-2xl border border-emerald-300/45 bg-emerald-500/20 px-4 py-3">
             <p className="text-[11px] font-black text-white uppercase tracking-widest">최적 제작 순서 가이드 (고정)</p>
             <p className="text-[12px] text-white mt-1 font-semibold">1) 컷 이미지 준비 → 2) 초반 훅 컷 영상 업로드 → 3) 영상 훅 컷 수 지정 → 4) 슬라이드 구성 → 5) 렌더링/MP4 변환</p>
-            <p className="text-[10px] text-emerald-50 mt-1">권장: 쇼츠는 훅 5~7컷, 컷당 2~4초, TTS 완료 후 렌더링</p>
+            <p className="text-[10px] text-emerald-50 mt-1">권장: 쇼츠는 훅 5~7컷, 이미지 슬라이드 컷당 4초 고정, TTS 완료 후 렌더링</p>
           </div>
           <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
             <p className="text-[10px] font-black text-emerald-200 uppercase tracking-widest mb-2">편집 섹션 바로가기</p>
@@ -367,7 +372,7 @@ export default function Panel12Section(props: Props) {
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-amber-100 uppercase tracking-widest">배경음악</label>
                 <select
-                  value={ui.finalVideo.bgmTrack}
+                  value={resolvedBgmTrack}
                   onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, bgmTrack: e.target.value, bgmTrackUserSelected: true } }))}
                   disabled={isOneClickFixed}
                   className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none disabled:opacity-50 disabled:cursor-not-allowed"
@@ -377,11 +382,10 @@ export default function Panel12Section(props: Props) {
                   ))}
                 </select>
                 <button
-                  onClick={() => playPreviewAudio(ui.finalVideo.bgmTrack, 'bgm')}
-                  disabled={isOneClickFixed}
-                  className={`w-full rounded-lg border px-3 py-2 text-[11px] font-black transition-all flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${previewAudioType === 'bgm' && previewAudioPath === ui.finalVideo.bgmTrack ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/10 text-white border-white/30 hover:bg-white/20'}`}
+                  onClick={() => playPreviewAudio(resolvedBgmTrack, 'bgm')}
+                  className={`w-full rounded-lg border px-3 py-2 text-[11px] font-black transition-all flex items-center justify-center gap-1 ${previewAudioType === 'bgm' && previewAudioPath === resolvedBgmTrack ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/10 text-white border-white/30 hover:bg-white/20'}`}
                 >
-                  <Play className="w-3 h-3" /> {previewAudioType === 'bgm' && previewAudioPath === ui.finalVideo.bgmTrack ? '배경음악 미리듣기 중지' : '배경음악 미리듣기'}
+                  <Play className="w-3 h-3" /> {previewAudioType === 'bgm' && previewAudioPath === resolvedBgmTrack ? '배경음악 미리듣기 중지' : '배경음악 미리듣기'}
                 </button>
               </div>
               <div className="space-y-2">
@@ -466,16 +470,9 @@ export default function Panel12Section(props: Props) {
                   )}
                   <div className="flex items-center justify-between gap-4">
                     <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">컷당 재생 시간</label>
-                    <span className="text-xs text-emerald-200 font-bold">{ui.finalVideo.slideDuration}초</span>
+                    <span className="text-xs text-emerald-200 font-bold">4초 (고정)</span>
                   </div>
-                  <InlineSmoothRange
-                    min={2}
-                    max={8}
-                    step={1}
-                    value={Number(ui.finalVideo.slideDuration || 3)}
-                    onChange={(v) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, slideDuration: Number(v) } }))}
-                    className="w-full accent-emerald-400"
-                  />
+                  <div className="bg-white/5 border border-white/10 rounded-lg py-2 text-center text-[10px] text-emerald-200">이미지 슬라이드는 4초 고정으로 싱크를 유지합니다.</div>
                   <div className="flex items-center justify-between gap-3 pt-1">
                     <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">렌더링 해상도</label>
                     <select
@@ -1082,7 +1079,7 @@ export default function Panel12Section(props: Props) {
               )}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[10px]">
                 <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">
-                  <p className="text-slate-400">대본(1.0x)</p>
+                  <p className="text-slate-400">대본(참고)</p>
                   <p className="font-black text-amber-300">{Math.ceil(syncReport.scriptSec)}초</p>
                 </div>
                 <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">
@@ -1098,7 +1095,7 @@ export default function Panel12Section(props: Props) {
                   <p className="font-black text-white">{Math.ceil(syncReport.renderSec)}초</p>
                 </div>
                 <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">
-                  <p className="text-slate-400">SRT 마지막</p>
+                  <p className="text-slate-400">자막 마지막</p>
                   <p className="font-black text-white">{Math.ceil(syncReport.srtLastEndSec)}초</p>
                 </div>
                 <div className={`border rounded-lg px-3 py-2 ${syncReport.status === '정상' ? 'bg-emerald-500/10 border-emerald-300/30' : syncReport.status === '주의' ? 'bg-amber-500/10 border-amber-300/30' : 'bg-rose-500/10 border-rose-300/30'}`}>

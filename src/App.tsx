@@ -199,6 +199,23 @@ const MM_TO_PX_1080 = 3.7795275591;
 
 const mmToPxScaled = (mm: number, width: number) => mm * MM_TO_PX_1080 * (width / 1080);
 
+const IMAGE_SLIDE_DURATION_SEC = 4;
+const SHORTS_VIDEO_DURATION_SEC = 4;
+const LONGFORM_VIDEO_DURATION_SEC = 8;
+
+const resolveVideoCutDurationSec = (scriptType?: string) =>
+  scriptType === 'long-form' || scriptType === 'longform'
+    ? LONGFORM_VIDEO_DURATION_SEC
+    : SHORTS_VIDEO_DURATION_SEC;
+
+const getSlideTimelineDurationSec = (slide: any, fallback: number) => {
+  if (Number(slide?.duration || 0) > 0) return Math.max(0.2, Number(slide.duration));
+  if (slide?.mediaType === 'video' && Number(slide?.videoDurationSec || 0) > 0) {
+    return Math.max(0.2, Number(slide.videoDurationSec));
+  }
+  return Math.max(0.2, fallback);
+};
+
 const PRODUCT_PROMO_MAX_IMAGES = 7;
 const PRODUCT_PROMO_AUTO_STYLE = '11. photorealistic';
 
@@ -948,9 +965,9 @@ const resolveProductPromoPlan = (productPromo: any) => {
       renderMode: 'image_slide' as const,
       targetCuts: 7,
       hookVideoCount: 0,
-      slideDuration: 3,
-      targetSeconds: 21,
-      scriptLength: '21초',
+      slideDuration: IMAGE_SLIDE_DURATION_SEC,
+      targetSeconds: 7 * IMAGE_SLIDE_DURATION_SEC,
+      scriptLength: `${7 * IMAGE_SLIDE_DURATION_SEC}초`,
     };
   }
 
@@ -969,16 +986,16 @@ const resolveProductPromoPlan = (productPromo: any) => {
   const hookVideoCount = manualHookVideoCount;
   const imageCuts = hookVideoCount === 2 ? 4 : 5;
   const targetCuts = hookVideoCount + imageCuts;
-  const targetSeconds = hookVideoCount * 4 + imageCuts * 3;
+  const targetSeconds = hookVideoCount * SHORTS_VIDEO_DURATION_SEC + imageCuts * IMAGE_SLIDE_DURATION_SEC;
 
   return {
     workflowMode,
     renderMode: 'image_slide' as const,
     targetCuts,
     hookVideoCount,
-    slideDuration: 3,
+    slideDuration: IMAGE_SLIDE_DURATION_SEC,
     targetSeconds,
-    scriptLength: '20초',
+    scriptLength: `${targetSeconds}초`,
   };
 };
 
@@ -1718,7 +1735,7 @@ export default function App() {
       url: '',
       slides: [] as Array<{ cut: number; imageUrl: string; motion: SlideMotionType; mediaType?: 'image' | 'video'; videoUrl?: string; videoDurationSec?: number }>,
       activeSlide: 0,
-      slideDuration: 3,
+      slideDuration: IMAGE_SLIDE_DURATION_SEC,
       resolution: 'hd' as RenderResolution,
       subtitleEnabled: true,
       subtitleMaxChars: 24,
@@ -1866,7 +1883,7 @@ export default function App() {
       running: false,
       step: '',
       error: '',
-      targetSeconds: 21,
+      targetSeconds: 7 * IMAGE_SLIDE_DURATION_SEC,
       renderMode: 'image_slide' as 'ai_video' | 'image_slide',
       hookVideoCount: 0,
       manualHookVideoCount: 1,
@@ -2060,6 +2077,17 @@ export default function App() {
     const query = String(ui.filters.query || '');
     setTranslatedQueriesByCountry(prev => ({ ...prev, 한국: query }));
   }, [ui.filters.query]);
+
+  useEffect(() => {
+    if (Number(ui.finalVideo.slideDuration || 0) === IMAGE_SLIDE_DURATION_SEC) return;
+    setUi(prev => ({
+      ...prev,
+      finalVideo: {
+        ...prev.finalVideo,
+        slideDuration: IMAGE_SLIDE_DURATION_SEC,
+      },
+    }));
+  }, [ui.finalVideo.slideDuration]);
   const currentManualStep = ui.script.generating ? '대본 생성' :
     ui.hookLoading ? '훅 제목 생성' :
     ui.thumbnail.generating ? '썸네일 생성' :
@@ -2119,28 +2147,18 @@ export default function App() {
   const timingSummary = useMemo(() => {
     const scriptSec = scriptMetrics.sec1x;
     const ttsSec = Number(ui.tts.measuredDuration || 0);
-    const fallbackSlideDuration = Math.max(1, Number(ui.finalVideo.slideDuration || 3));
+    const fallbackSlideDuration = Math.max(1, Number(ui.finalVideo.slideDuration || IMAGE_SLIDE_DURATION_SEC));
     const cutsSec = ui.finalVideo.slides.length > 0
-      ? ui.finalVideo.slides.reduce((sum, slide: any) => {
-          if (slide?.mediaType === 'video' && Number(slide?.videoDurationSec || 0) > 0) {
-            return sum + Number(slide.videoDurationSec);
-          }
-          return sum + fallbackSlideDuration;
-        }, 0)
+      ? ui.finalVideo.slides.reduce((sum, slide: any) => sum + getSlideTimelineDurationSec(slide, fallbackSlideDuration), 0)
       : (ui.cuts.items?.length || 0) * fallbackSlideDuration;
-    const effectiveSec = Math.max(cutsSec, ttsSec || scriptSec);
+    const effectiveSec = ttsSec > 0 ? ttsSec : Math.max(cutsSec, scriptSec);
     return { scriptSec, ttsSec, cutsSec, effectiveSec };
   }, [scriptMetrics.sec1x, ui.tts.measuredDuration, ui.cuts.items, ui.finalVideo.slideDuration, ui.finalVideo.slides]);
   const longformGuide = useMemo(() => estimateLongformGuide(ui.script.output || ''), [ui.script.output]);
   const syncReport = useMemo(() => {
     const slides = ui.finalVideo.slides;
-    const fallbackSlideDuration = Math.max(1, Number(ui.finalVideo.slideDuration || 3));
-    const slideDurationTotal = Math.max(0, slides.reduce((sum: number, slide: any) => {
-      if (slide?.mediaType === 'video' && Number(slide?.videoDurationSec || 0) > 0) {
-        return sum + Number(slide.videoDurationSec);
-      }
-      return sum + fallbackSlideDuration;
-    }, 0));
+    const fallbackSlideDuration = Math.max(1, Number(ui.finalVideo.slideDuration || IMAGE_SLIDE_DURATION_SEC));
+    const slideDurationTotal = Math.max(0, slides.reduce((sum: number, slide: any) => sum + getSlideTimelineDurationSec(slide, fallbackSlideDuration), 0));
     const introDuration = ui.finalVideo.includeThumbnailIntro && ui.thumbnail.url
       ? Math.max(0.5, Number(ui.finalVideo.thumbnailIntroDuration || 1))
       : 0;
@@ -2159,7 +2177,7 @@ export default function App() {
       scriptSec: timingSummary.scriptSec,
       ttsSec: timingSummary.ttsSec,
       cutsSec: timingSummary.cutsSec,
-      renderSec: Math.max(slideDurationTotal + introDuration, ttsEndAbs),
+      renderSec: timingSummary.ttsSec > 0 ? ttsEndAbs : (slideDurationTotal + introDuration),
       srtLastEndSec: subtitleEndAbs,
       deltaSec,
       status,
@@ -4046,20 +4064,20 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       if (opts?.productMode) {
         const measured = Math.max(0, Number(latestUiRef.current?.tts?.measuredDuration || 0));
         if (measured > 0) {
-          const ttsBasedCuts = Math.max(3, Math.min(24, Math.ceil(measured / 3)));
+          const ttsBasedCuts = Math.max(3, Math.min(24, Math.ceil(measured / IMAGE_SLIDE_DURATION_SEC)));
           setUi(prev => ({
             ...prev,
             productPromo: {
               ...prev.productPromo,
               targetCuts: ttsBasedCuts,
-              targetSeconds: ttsBasedCuts * 3,
+              targetSeconds: ttsBasedCuts * IMAGE_SLIDE_DURATION_SEC,
             },
             autoFlow: {
               ...prev.autoFlow,
               step: `컷 재계산 (TTS ${measured.toFixed(1)}초 → ${ttsBasedCuts}컷)`,
             },
           }));
-          appendAutoLog(`TTS 실측 ${measured.toFixed(1)}초 기준 컷 재계산: ${ttsBasedCuts}컷 (컷당 3초)`);
+          appendAutoLog(`TTS 실측 ${measured.toFixed(1)}초 기준 컷 재계산: ${ttsBasedCuts}컷 (컷당 ${IMAGE_SLIDE_DURATION_SEC}초)`);
           await new Promise(r => setTimeout(r, 0));
         }
       }
@@ -4072,7 +4090,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       if (opts?.productMode) {
         const measured = Math.max(0, Number(latestUiRef.current?.tts?.measuredDuration || 0));
         const ttsBasedCuts = measured > 0
-          ? Math.max(3, Math.min(24, Math.ceil(measured / 3)))
+          ? Math.max(3, Math.min(24, Math.ceil(measured / IMAGE_SLIDE_DURATION_SEC)))
           : Math.max(3, Math.min(24, Number(opts?.productTargetCuts ?? latestUiRef.current?.productPromo?.targetCuts ?? 7)));
         const balanced = rebalanceCutsToTarget([...(latestUiRef.current?.cuts?.items || [])], ttsBasedCuts);
         const compact = compactCutsToMax(balanced, ttsBasedCuts);
@@ -4514,7 +4532,7 @@ JSON만 반환:
         finalVideo: {
           ...prev.finalVideo,
           type: 'image_slide',
-          slideDuration: 3,
+          slideDuration: IMAGE_SLIDE_DURATION_SEC,
           useHybridHookVideos: false,
           hookVideoCount: 0,
           modifications: String(parsed?.visualGuide || prev.finalVideo.modifications || ''),
@@ -5756,33 +5774,8 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
     const hookVideoCuts = new Set(videoCutIds.slice(0, resolvedHookCount));
 
     const cutTexts = ui.cuts.items || [];
-    const totalDuration = Number(ui.tts.measuredDuration || 0) > 0
-      ? Number(ui.tts.measuredDuration || 0)
-      : Math.max(Number(scriptMetrics.sec1x || 0), cutTexts.length * Math.max(1, Number(ui.finalVideo.slideDuration || 3)));
-    const safeTotalDuration = Math.max(1, totalDuration);
-    const buildDurationsByCut = () => {
-      const count = Math.max(1, cutTexts.length);
-      const minPerCut = 0.6;
-      if (safeTotalDuration < minPerCut * count) {
-        const even = Math.max(0.2, safeTotalDuration / count);
-        return cutTexts.reduce<Record<number, number>>((acc, _, idx) => {
-          acc[idx + 1] = even;
-          return acc;
-        }, {});
-      }
-      const weights = cutTexts.map(text => Math.max(1, normalizeSubtitleText(text).replace(/\s/g, '').length));
-      const totalWeight = weights.reduce((sum, w) => sum + w, 0) || 1;
-      const durations = weights.map(w => (safeTotalDuration * w) / totalWeight);
-      const sumWithoutLast = durations.slice(0, -1).reduce((sum, v) => sum + v, 0);
-      if (durations.length > 0) {
-        durations[durations.length - 1] = Math.max(0.2, safeTotalDuration - sumWithoutLast);
-      }
-      return durations.reduce<Record<number, number>>((acc, duration, idx) => {
-        acc[idx + 1] = duration;
-        return acc;
-      }, {});
-    };
-    const durationByCut = buildDurationsByCut();
+    const slideDurationUnit = IMAGE_SLIDE_DURATION_SEC;
+    const videoDurationUnit = resolveVideoCutDurationSec(ui.script.type);
     const availableSlides = ui.imageJobs
       .filter(j => j.imageUrl)
       .sort((a, b) => a.cut - b.cut)
@@ -5792,9 +5785,9 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
           cut: j.cut,
           imageUrl: j.imageUrl,
           videoUrl: mediaType === 'video' ? sortedVideoJobs.find((v: any) => v.cut === j.cut)?.videoUrl || '' : '',
-          videoDurationSec: mediaType === 'video' ? Number(sortedVideoJobs.find((v: any) => v.cut === j.cut)?.durationSec || 0) : 0,
+          videoDurationSec: mediaType === 'video' ? videoDurationUnit : 0,
           mediaType,
-          duration: durationByCut[j.cut] || Math.max(0.2, Number(ui.finalVideo.slideDuration || 3)),
+          duration: mediaType === 'video' ? videoDurationUnit : slideDurationUnit,
           motion: previousMotionByCut.get(j.cut) || pickSlideMotion(ui.cuts.items[j.cut - 1] || '', j.cut),
         };
       });
@@ -5814,7 +5807,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
             videoUrl: '',
             videoDurationSec: 0,
             mediaType: 'image' as const,
-            duration: 3,
+            duration: slideDurationUnit,
             motion: pickSlideMotion(ui.cuts.items[idx] || '', idx + 1),
           }));
 
@@ -5832,14 +5825,12 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
           ? sortedVideoJobs[idx] || sortedVideoJobs.find((v: any) => v.cut === source.cut)
           : null;
         const mediaType: 'image' | 'video' = matchedVideo?.videoUrl ? 'video' : 'image';
-        const duration = productPlan.renderMode === 'ai_video'
-          ? 4
-          : (mediaType === 'video' ? 4 : 3);
+        const duration = mediaType === 'video' ? videoDurationUnit : slideDurationUnit;
         return {
           cut: idx + 1,
           imageUrl: source.imageUrl,
           videoUrl: mediaType === 'video' ? String(matchedVideo?.videoUrl || '') : '',
-          videoDurationSec: mediaType === 'video' ? Number(matchedVideo?.durationSec || 0) : 0,
+          videoDurationSec: mediaType === 'video' ? videoDurationUnit : 0,
           mediaType,
           duration,
           motion: source.motion || pickSlideMotion(ui.cuts.items[idx] || '', idx + 1),
@@ -5866,7 +5857,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
         outputFormat: 'webm',
         hookVideoCount: resolvedHookCount,
         useHybridHookVideos: resolvedHookCount > 0,
-        slideDuration: isProductPromoContext ? productPlan.slideDuration : prev.finalVideo.slideDuration,
+        slideDuration: IMAGE_SLIDE_DURATION_SEC,
       },
     }));
     const hookVideoCount = normalizedSlides.filter((s: any) => s.mediaType === 'video' && s.videoUrl).length;
@@ -6017,15 +6008,13 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
         }
       }
 
-      const fallbackSlideDuration = Math.max(1, Number(ui.finalVideo.slideDuration || 3));
+      const fallbackSlideDuration = IMAGE_SLIDE_DURATION_SEC;
+      const videoDurationUnit = resolveVideoCutDurationSec(ui.script.type);
       const slideDurations = slides.map((slide: any) => {
-        if (Number(slide?.duration || 0) > 0) {
-          return Math.max(0.2, Number(slide.duration));
+        if (slide?.mediaType === 'video') {
+          return Math.max(0.2, Number(slide?.duration || videoDurationUnit));
         }
-        if (slide?.mediaType === 'video' && Number(slide?.videoDurationSec || 0) > 0) {
-          return Math.max(0.2, Number(slide.videoDurationSec));
-        }
-        return fallbackSlideDuration;
+        return Math.max(0.2, Number(slide?.duration || fallbackSlideDuration));
       });
       const slideStartTimes = slideDurations.reduce<number[]>((acc, duration, idx) => {
         if (idx === 0) {
@@ -6120,7 +6109,10 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
       }
 
       const narrationDuration = shouldMixTts ? Math.max(0, audioDuration) : slideDurationTotal;
-      const totalDuration = Math.max(baseVideoDuration, introDuration + narrationDuration);
+      const masterDuration = shouldMixTts && narrationDuration > 0
+        ? narrationDuration
+        : slideDurationTotal;
+      const totalDuration = introDuration + masterDuration;
       const subtitleTimelineDuration = narrationDuration;
       if (totalDuration <= 0) {
         throw new Error('렌더링 길이를 계산할 수 없습니다.');
@@ -7095,7 +7087,7 @@ ${JSON.stringify(cutPayload)}`,
             <p className="text-[10px] font-black text-fuchsia-200 uppercase tracking-widest">진행 방식</p>
             <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={() => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, workflowMode: 'auto', renderMode: 'image_slide', strictProductLock: true, hookVideoCount: 0, targetCuts: 7, targetSeconds: 21 } }))}
+                onClick={() => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, workflowMode: 'auto', renderMode: 'image_slide', strictProductLock: true, hookVideoCount: 0, targetCuts: 7, targetSeconds: 7 * IMAGE_SLIDE_DURATION_SEC } }))}
                 className={`py-2 rounded-lg text-[10px] font-black border transition-all ${productPromoPlan.workflowMode === 'auto' ? 'bg-fuchsia-400 text-black border-fuchsia-300' : 'bg-white/5 text-slate-300 border-white/15'}`}
               >
                 자동
@@ -8173,25 +8165,8 @@ ${JSON.stringify(cutPayload)}`,
                       <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{ui.script.lang === 'EN' ? '단어 수' : '글자 수(공백 제외)'}</span>
                       <span className="text-lg font-bold text-white">{scriptMetrics.units}{scriptMetrics.unitsLabel}</span>
                     </div>
-                    <div className="flex-1 bg-black/40 border border-white/5 p-4 rounded-2xl flex flex-col items-center justify-center">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">예상 시간 (1.0x)</span>
-                      <span className="text-lg font-bold text-amber-400">{Math.ceil(scriptMetrics.sec1x)}초</span>
-                    </div>
-                    <div className="flex-1 bg-black/40 border border-white/5 p-4 rounded-2xl flex flex-col items-center justify-center">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">예상 시간 (1.25x)</span>
-                      <span className="text-lg font-bold text-cyan-400">{Math.ceil(scriptMetrics.sec125)}초</span>
-                    </div>
                   </div>
-                  {ui.script.type === 'shorts' && (scriptMetrics.sec1x > scriptMetrics.maxSec1x || scriptMetrics.sec125 > scriptMetrics.maxSec125) && (
-                    <p className="text-[11px] text-rose-300 font-bold">
-                      쇼츠 제한 초과: 1.0x {Math.ceil(scriptMetrics.sec1x)}초 / 1.25x {Math.ceil(scriptMetrics.sec125)}초. 목표는 1.0x 72초 이하, 1.25x 58초 이하입니다.
-                    </p>
-                  )}
-                  {ui.tts.measuredDuration > 0 && (
-                    <p className="text-[11px] text-emerald-300 font-bold">
-                      실측 TTS 길이: {ui.tts.measuredDuration.toFixed(1)}초 (예상 1.0x 대비 차이 {Math.abs(ui.tts.measuredDuration - scriptMetrics.sec1x).toFixed(1)}초)
-                    </p>
-                  )}
+                  {ui.tts.measuredDuration > 0 && <p className="text-[11px] text-emerald-300 font-bold">실측 TTS 길이: {ui.tts.measuredDuration.toFixed(1)}초</p>}
                   <div className="bg-black/40 border border-white/5 p-6 rounded-3xl relative group">
                     <div className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap max-h-[400px] overflow-y-auto custom-scrollbar">
                       <Markdown>{ui.script.output}</Markdown>
@@ -8650,8 +8625,8 @@ ${JSON.stringify(cutPayload)}`,
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
                 <div className="bg-black/30 border border-white/10 rounded-xl px-3 py-2">
-                  <p className="text-slate-400">대본(1.0x)</p>
-                  <p className="text-amber-300 font-black">{Math.ceil(timingSummary.scriptSec)}초</p>
+                  <p className="text-slate-400">대본 글자수</p>
+                  <p className="text-amber-300 font-black">{scriptMetrics.units}{scriptMetrics.unitsLabel}</p>
                 </div>
                 <div className="bg-black/30 border border-white/10 rounded-xl px-3 py-2">
                   <p className="text-slate-400">TTS 실측</p>
