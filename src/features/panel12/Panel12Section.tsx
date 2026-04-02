@@ -257,6 +257,20 @@ export default function Panel12Section(props: Props) {
     return splitTitlePreviewLines(String(ui.finalVideo.templateTitleText || ''));
   }, [ui.finalVideo.templateTitleText]);
 
+  const previewExtraOverlays = React.useMemo(() => {
+    const preset = SUBTITLE_PRESETS[ui.finalVideo.subtitlePreset] as any;
+    const baseScale = Number(preset?.fontScale || 0.045);
+    return (ui.finalVideo.textOverlays || [])
+      .map((item: any) => ({
+        ...item,
+        text: String(item?.text || ''),
+        scale: Math.max(TEXT_SCALE_MIN, Math.min(TEXT_SCALE_MAX, Number(item?.scale || 1))),
+        fontPx: Math.max(10, Math.round(previewFrameWidth * baseScale * Math.max(TEXT_SCALE_MIN, Math.min(TEXT_SCALE_MAX, Number(item?.scale || 1))))),
+        gridPosition: Math.min(10, Math.max(1, Number(item?.gridPosition || 7))),
+      }))
+      .filter((item: any) => item.text.trim().length > 0);
+  }, [ui.finalVideo.textOverlays, ui.finalVideo.subtitlePreset, previewFrameWidth, SUBTITLE_PRESETS]);
+
   const previewTitleTopPercent = React.useMemo(() => {
     const previewHeight = previewFrameWidth * (16 / 9);
     const topMm = Math.max(0, Number(ui.finalVideo.templateTitleLine1TopMm || 20));
@@ -924,6 +938,85 @@ export default function Panel12Section(props: Props) {
                             </div>
                           </div>
                         )}
+                        <div className="space-y-2 pt-2 border-t border-white/10">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">추가 텍스트</label>
+                            <button
+                              onClick={() => setUi((prev: any) => ({
+                                ...prev,
+                                finalVideo: {
+                                  ...prev.finalVideo,
+                                  textOverlays: [
+                                    ...(prev.finalVideo.textOverlays || []),
+                                    {
+                                      id: `txt-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+                                      text: '추가 텍스트',
+                                      color: '#ffffff',
+                                      bgColor: '#0f172a',
+                                      scale: 1,
+                                      gridPosition: 7,
+                                      align: 'center',
+                                    },
+                                  ].slice(0, 5),
+                                },
+                              }))}
+                              className="px-2 py-1 rounded-md bg-emerald-400 text-black text-[10px] font-black"
+                            >
+                              + 글 추가
+                            </button>
+                          </div>
+                          {(ui.finalVideo.textOverlays || []).length === 0 && (
+                            <p className="text-[10px] text-slate-500">필요할 때만 추가하세요. 제목/자막 외 보조 문구 표시용입니다.</p>
+                          )}
+                          {(ui.finalVideo.textOverlays || []).map((item: any, idx: number) => (
+                            <div key={item.id || idx} className="space-y-2 rounded-lg border border-white/10 bg-black/20 p-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-black text-emerald-200">TEXT {idx + 1}</span>
+                                <button
+                                  onClick={() => setUi((prev: any) => ({
+                                    ...prev,
+                                    finalVideo: {
+                                      ...prev.finalVideo,
+                                      textOverlays: (prev.finalVideo.textOverlays || []).filter((t: any) => t.id !== item.id),
+                                    },
+                                  }))}
+                                  className="text-[10px] font-black text-rose-300"
+                                >
+                                  삭제
+                                </button>
+                              </div>
+                              <textarea
+                                value={String(item.text || '')}
+                                onChange={(e) => setUi((prev: any) => ({
+                                  ...prev,
+                                  finalVideo: {
+                                    ...prev.finalVideo,
+                                    textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, text: e.target.value } : t),
+                                  },
+                                }))}
+                                className="w-full bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] text-white outline-none min-h-[44px]"
+                              />
+                              <div className="grid grid-cols-4 gap-2">
+                                <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                  색상
+                                  <input type="color" value={String(item.color || '#ffffff')} onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, color: e.target.value } : t) } }))} className="w-6 h-5 bg-transparent border-0" />
+                                </label>
+                                <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                  배경
+                                  <input type="color" value={String(item.bgColor || '#0f172a')} onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, bgColor: e.target.value } : t) } }))} className="w-6 h-5 bg-transparent border-0" />
+                                </label>
+                                <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                  크기
+                                  <input type="number" min="0.7" max="2.2" step="0.1" value={Number(item.scale || 1)} onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, scale: Number(e.target.value || 1) } : t) } }))} className="w-12 bg-transparent text-right outline-none" />
+                                </label>
+                                <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                  위치
+                                  <input type="number" min="1" max="10" step="1" value={Number(item.gridPosition || 7)} onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, gridPosition: Number(e.target.value || 7) } : t) } }))} className="w-10 bg-transparent text-right outline-none" />
+                                </label>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                       <div id="panel12-subtitle" className="flex items-center justify-between gap-3 pt-1">
                         <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">자막 글자 크기</label>
@@ -1257,6 +1350,25 @@ export default function Panel12Section(props: Props) {
                         <p className="absolute left-[6%] bottom-[8%] text-white/75 text-[11px] font-black">Your name</p>
                       </>
                     )}
+                    {previewExtraOverlays.map((item: any) => (
+                      <div
+                        key={`overlay-url-${item.id}`}
+                        className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] rounded-lg border border-white/15 px-2 py-1"
+                        style={{
+                          top: `${gridPositionToPercent(item.gridPosition)}%`,
+                          background: item.bgColor || 'rgba(15,23,42,0.55)',
+                          color: item.color || '#ffffff',
+                          fontSize: `${item.fontPx}px`,
+                          lineHeight: `${Math.round(item.fontPx * 1.22)}px`,
+                          textAlign: item.align || 'center',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          overflowWrap: 'anywhere',
+                        }}
+                      >
+                        {item.text}
+                      </div>
+                    ))}
                   </div>
                 </div>
               ) : ui.finalVideo.type === 'image_slide' && ui.finalVideo.slides.length > 0 ? (
@@ -1315,6 +1427,9 @@ export default function Panel12Section(props: Props) {
                             fontFamily: ui.finalVideo.templateTitleFontFamily || 'Pretendard',
                             fontSize: `${previewTitleFontPx}px`,
                             lineHeight: `${Math.round(previewTitleFontPx * 1.1)}px`,
+                            maxWidth: `${Math.round(previewFrameWidth * 0.84)}px`,
+                            wordBreak: 'break-word',
+                            overflowWrap: 'anywhere',
                           }}
                         >
                           {(previewTitleLines.length > 0 ? previewTitleLines : ['']).map((line, idx) => (
@@ -1359,6 +1474,25 @@ export default function Panel12Section(props: Props) {
                           <p className="absolute left-[6%] bottom-[8%] text-white/75 text-[11px] font-black">Your name</p>
                         </>
                       )}
+                      {previewExtraOverlays.map((item: any) => (
+                        <div
+                          key={`overlay-slide-${item.id}`}
+                          className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] rounded-lg border border-white/15 px-2 py-1"
+                          style={{
+                            top: `${gridPositionToPercent(item.gridPosition)}%`,
+                            background: item.bgColor || 'rgba(15,23,42,0.55)',
+                            color: item.color || '#ffffff',
+                            fontSize: `${item.fontPx}px`,
+                            lineHeight: `${Math.round(item.fontPx * 1.22)}px`,
+                            textAlign: item.align || 'center',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            overflowWrap: 'anywhere',
+                          }}
+                        >
+                          {item.text}
+                        </div>
+                      ))}
                     </div>
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-[10px]">

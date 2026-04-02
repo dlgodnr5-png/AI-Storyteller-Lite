@@ -749,6 +749,25 @@ const buildScriptMetrics = (text: string, lang: 'KR' | 'EN' | 'JP') => {
   };
 };
 
+const deriveAudienceToneFromResults = (rows: any[]) => {
+  const titles = (rows || []).slice(0, 12).map((r: any) => normalizeSubtitleText(String(r?.title || ''))).join(' ').toLowerCase();
+  const has = (keywords: string[]) => keywords.some(k => titles.includes(k));
+
+  let audience = '20~40대 일반 사용자';
+  if (has(['육아', '아기', '맘', '엄마', '아빠', '키즈', 'baby', 'parent'])) audience = '20~40대 부모/가정 사용자';
+  else if (has(['직장인', '회사', '출근', '퇴근', 'office', 'business'])) audience = '20~40대 직장인';
+  else if (has(['학생', '수험', '공부', 'school', 'study'])) audience = '10~20대 학생층';
+  else if (has(['50대', '60대', '중장년', '시니어', 'senior'])) audience = '40~60대 중장년층';
+
+  let tone = '공감형 후킹, 짧고 명확한 전달';
+  if (has(['충격', '반전', '논란', '미쳤', '실화', 'breaking'])) tone = '강한 후킹, 빠른 몰입, 짧은 임팩트';
+  else if (has(['리뷰', '비교', '추천', '가이드', 'how to', 'tip'])) tone = '정보형 설득, 신뢰 중심, 비교/근거 제시';
+  else if (has(['심리', '명상', '힐링', '공감', '위로'])) tone = '차분한 공감형, 신뢰와 위로 중심';
+  else if (has(['뉴스', '속보', '브리핑', 'issue'])) tone = '뉴스 브리핑형, 명확하고 단정한 전달';
+
+  return { audience, tone };
+};
+
 const estimateLongformGuide = (text: string) => {
   const chars = Array.from(text || '').filter(ch => !isWhitespace(ch)).length;
   const match = LONGFORM_GUIDE_TABLE.find(row => chars >= row.minChars && chars <= row.maxChars)
@@ -1075,10 +1094,33 @@ const drawTemplateTitleOverlay = (
     .split(/\r?\n/)
     .map(v => normalizeSubtitleText(v))
     .filter(Boolean);
-  const lines = rawLines.length > 0 ? rawLines.slice(0, 2) : [normalizeHookTitleForOverlay(text)];
+  const lines = rawLines.length > 0 ? rawLines.slice(0, 4) : [normalizeHookTitleForOverlay(text)];
   if (lines.length === 0) return;
 
-  const clampedLines = lines;
+  const maxTextWidth = Math.round(width * 0.84);
+  const wrapLineByWidth = (input: string) => {
+    const chars = Array.from(String(input || ''));
+    const wrapped: string[] = [];
+    let current = '';
+    for (const ch of chars) {
+      const candidate = `${current}${ch}`;
+      if (!candidate.trim()) {
+        current = candidate;
+        continue;
+      }
+      const w = ctx.measureText(candidate).width;
+      if (w <= maxTextWidth || !current) {
+        current = candidate;
+      } else {
+        wrapped.push(current.trim());
+        current = ch;
+      }
+    }
+    if (current.trim()) wrapped.push(current.trim());
+    return wrapped;
+  };
+
+  let clampedLines = lines;
   const topPx = mmToPxScaled(options.line1TopMm || 20, width);
   const bottomLimitPx = mmToPxScaled(options.line2BottomMm || 35, width);
   const fontFamily = (options.fontFamily || 'Anemone').trim() || 'Anemone';
@@ -1099,11 +1141,19 @@ const drawTemplateTitleOverlay = (
   };
 
   let metrics = measure();
-  let secondBottom = topPx + metrics.ascent + (clampedLines.length > 1 ? metrics.lineHeight : 0) + metrics.descent;
+  ctx.save();
+  ctx.font = `900 ${fontPx}px "${fontFamily}", "Pretendard", "Noto Sans KR", sans-serif`;
+  clampedLines = lines.flatMap(line => wrapLineByWidth(line)).slice(0, 4);
+  ctx.restore();
+  let secondBottom = topPx + metrics.ascent + (Math.max(1, clampedLines.length) - 1) * metrics.lineHeight + metrics.descent;
   while (secondBottom > bottomLimitPx && fontPx > 10) {
     fontPx -= 0.6;
     metrics = measure();
-    secondBottom = topPx + metrics.ascent + (clampedLines.length > 1 ? metrics.lineHeight : 0) + metrics.descent;
+    ctx.save();
+    ctx.font = `900 ${fontPx}px "${fontFamily}", "Pretendard", "Noto Sans KR", sans-serif`;
+    clampedLines = lines.flatMap(line => wrapLineByWidth(line)).slice(0, 4);
+    ctx.restore();
+    secondBottom = topPx + metrics.ascent + (Math.max(1, clampedLines.length) - 1) * metrics.lineHeight + metrics.descent;
   }
 
   const drawStyledLine = (line: string, baselineY: number, fillColor: string) => {
@@ -1135,12 +1185,81 @@ const drawTemplateTitleOverlay = (
 
   const line1Baseline = topPx + metrics.ascent;
   drawStyledLine(clampedLines[0], line1Baseline, options.line1Color || '#ef4444');
-  if (clampedLines[1]) {
-    const line2Baseline = line1Baseline + metrics.lineHeight;
-    drawStyledLine(clampedLines[1], line2Baseline, options.line2Color || '#111111');
+  if (clampedLines.length > 1) {
+    for (let i = 1; i < clampedLines.length; i += 1) {
+      const nextBaseline = line1Baseline + metrics.lineHeight * i;
+      drawStyledLine(clampedLines[i], nextBaseline, options.line2Color || '#111111');
+    }
   }
 
   ctx.restore();
+};
+
+const drawExtraTextOverlays = (
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  overlays: Array<{
+    text: string;
+    color: string;
+    bgColor: string;
+    scale: number;
+    gridPosition: number;
+    align: 'left' | 'center' | 'right';
+  }> = [],
+) => {
+  const items = (overlays || []).filter(item => normalizeSubtitleText(item?.text || '').length > 0);
+  if (items.length === 0) return;
+
+  for (const item of items) {
+    const fontPx = Math.max(12, Math.round(Math.min(width, height) * 0.038 * Math.max(0.7, Math.min(2.2, Number(item.scale || 1)))));
+    const lineHeight = Math.round(fontPx * 1.25);
+    const maxWidth = Math.round(width * 0.8);
+    ctx.save();
+    ctx.font = `800 ${fontPx}px "Pretendard", "Noto Sans KR", sans-serif`;
+    const chars = Array.from(normalizeSubtitleText(item.text));
+    const lines: string[] = [];
+    let current = '';
+    for (const ch of chars) {
+      const cand = `${current}${ch}`;
+      if (ctx.measureText(cand).width <= maxWidth || !current) current = cand;
+      else {
+        lines.push(current);
+        current = ch;
+      }
+    }
+    if (current) lines.push(current);
+    const safeTop = Math.round(height * 0.06);
+    const safeBottom = Math.round(height * 0.06);
+    const blockHeight = lineHeight * lines.length + 16;
+    const usable = Math.max(0, height - safeTop - safeBottom - blockHeight);
+    const top = safeTop + ((Math.min(10, Math.max(1, Number(item.gridPosition || 7))) - 1) / 9) * usable;
+    const boxX = Math.round(width * 0.1);
+    const boxW = Math.round(width * 0.8);
+
+    ctx.fillStyle = item.bgColor || '#0f172a';
+    ctx.globalAlpha = 0.55;
+    drawRoundedRect(ctx, boxX, top, boxW, blockHeight, 12);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(2, Math.round(fontPx * 0.1));
+    ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+    ctx.fillStyle = item.color || '#ffffff';
+
+    const align = item.align || 'center';
+    const baseX = align === 'left' ? boxX + 14 : align === 'right' ? boxX + boxW - 14 : boxX + boxW / 2;
+    ctx.textAlign = align;
+    lines.forEach((line, idx) => {
+      const y = top + 8 + lineHeight * idx + lineHeight / 2;
+      ctx.strokeText(line, baseX, y);
+      ctx.fillText(line, baseX, y);
+    });
+    ctx.restore();
+  }
 };
 
 const splitSubtitleUnits = (text: string) => {
@@ -1733,7 +1852,7 @@ export default function App() {
     imageJobs: [] as any[],
     videoJobs: [] as any[],
     finalVideo: {
-      type: 'ai_video' as 'ai_video' | 'image_slide',
+      type: 'image_slide' as 'ai_video' | 'image_slide',
       modifications: '',
       generating: false,
       url: '',
@@ -1768,6 +1887,15 @@ export default function App() {
       templateTitleStrokeColor: 'rgba(0,0,0,0.92)',
       templateTitleScale: 2,
       templateTitleGenerating: false,
+      textOverlays: [] as Array<{
+        id: string;
+        text: string;
+        color: string;
+        bgColor: string;
+        scale: number;
+        gridPosition: number;
+        align: 'left' | 'center' | 'right';
+      }>,
       transcoding: false,
       ffmpegReady: false,
       ffmpegNote: '',
@@ -2077,7 +2205,21 @@ export default function App() {
 
   useEffect(() => {
     const cached = searchCacheByCountry[ui.filters.country];
-    setResults(Array.isArray(cached) ? cached : []);
+    const rows = Array.isArray(cached) ? cached : [];
+    setResults(rows);
+    if (rows.length === 0) return;
+    const hints = deriveAudienceToneFromResults(rows);
+    setUi(prev => {
+      if (prev.script.targetAudience === hints.audience && prev.script.tone === hints.tone) return prev;
+      return {
+        ...prev,
+        script: {
+          ...prev.script,
+          targetAudience: hints.audience,
+          tone: hints.tone,
+        },
+      };
+    });
   }, [ui.filters.country, searchCacheByCountry]);
 
   useEffect(() => {
@@ -2681,7 +2823,17 @@ JSON 스키마:
       }
 
       setSearchCacheByCountry(nextCache);
-      setResults(nextCache[ui.filters.country] || []);
+      const activeRows = nextCache[ui.filters.country] || [];
+      setResults(activeRows);
+      const hints = deriveAudienceToneFromResults(activeRows);
+      setUi(prev => ({
+        ...prev,
+        script: {
+          ...prev.script,
+          targetAudience: hints.audience,
+          tone: hints.tone,
+        },
+      }));
       if (failedCountries.length > 0) {
         setUi(prev => ({ ...prev, searchError: `${failedCountries.join(', ')} 검색 실패 (다른 국가는 반영됨)` }));
       }
@@ -6379,6 +6531,10 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
             }
           }
 
+          if (Array.isArray(ui.finalVideo.textOverlays) && ui.finalVideo.textOverlays.length > 0) {
+            drawExtraTextOverlays(ctx, width, height, ui.finalVideo.textOverlays as any);
+          }
+
           requestAnimationFrame(render);
         };
         render();
@@ -9081,36 +9237,47 @@ ${JSON.stringify(cutPayload)}`,
         <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl">
           <PanelHeader title="13. 영상편집" id="p13" colorClass="text-rose-400" />
           {ui.panelsOpen.p13 && (
-            <div className="space-y-6">
+            <div className="space-y-4">
               <div className="rounded-2xl border border-rose-300/30 bg-rose-500/10 p-4 space-y-2">
-                <p className="text-[11px] font-black text-rose-100 uppercase tracking-widest">영상 편집 안내 (준비중)</p>
-                <p className="text-xs text-rose-100/90">자동 진행은 12번까지 수행됩니다. 결과가 마음에 들지 않으면 이 패널에서 자산을 불러와 최종 편집 후 내보내기를 진행하세요.</p>
-                <p className="text-[11px] text-slate-200">예정 기능: 자막 글자크기/폰트/위치, 제목 글자크기/폰트/위치, 영상 배속 결정, 최종 저장/내보내기</p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
-                  <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">이미지 자산: <span className="font-black text-white">{ui.imageJobs.filter((j: any) => j.imageUrl).length}</span></div>
-                  <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">영상 자산: <span className="font-black text-white">{ui.videoJobs.filter((j: any) => j.videoUrl).length}</span></div>
-                  <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">컷 수: <span className="font-black text-white">{ui.cuts.items.length}</span></div>
-                  <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">TTS 길이: <span className="font-black text-white">{ui.tts.measuredDuration > 0 ? `${ui.tts.measuredDuration.toFixed(1)}초` : '미측정'}</span></div>
-                </div>
+                <p className="text-[11px] font-black text-rose-100 uppercase tracking-widest">13번 = 12번 컨트롤 재사용 편집</p>
+                <p className="text-xs text-rose-100/90">13번은 렌더 자산 재편집 전용입니다. 아래 컨트롤은 12번과 동일 엔진을 직접 재사용합니다.</p>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-black text-slate-500 uppercase tracking-widest">영상 배속 설정</label>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      {['1.0', '1.25', '1.5', '2.0'].map(speed => (
-                        <button key={speed} className="py-2 bg-white/5 border border-white/10 rounded-xl text-xs font-bold hover:bg-white/10 transition-all">
-                          {speed}x
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">배속 결정 후 유튜브 설명란의 타임라인을 최종 확정할 수 있습니다.</p>
-                </div>
-                <div className="bg-black/40 border border-white/5 rounded-2xl p-6 flex items-center justify-center italic text-slate-600 text-xs">
-                  고급 타임라인 편집 기능 준비 중...
-                </div>
-              </div>
+              <Panel12Section
+                ui={ui}
+                setUi={setUi}
+                PanelHeader={PanelHeader}
+                handleGenerateFinalVideo={handleGenerateFinalVideo}
+                handleExportSlideVideo={handleExportSlideVideo}
+                handleDownloadSrt={handleDownloadSrt}
+                canDownload={isApprovedUser}
+                handleConvertToMp4={handleConvertToMp4}
+                saveCurrentSubtitleTemplate={saveCurrentSubtitleTemplate}
+                applySubtitleTemplate={applySubtitleTemplate}
+                exportSubtitleTemplates={exportSubtitleTemplates}
+                importSubtitleTemplates={importSubtitleTemplates}
+                applySavedSubtitleTemplate={applySavedSubtitleTemplate}
+                removeSavedSubtitleTemplate={removeSavedSubtitleTemplate}
+                applyBuiltinSubtitleTemplate={applyBuiltinSubtitleTemplate}
+                handleTemplatePreviewUpload={handleTemplatePreviewUpload}
+                resetTemplatePreview={resetTemplatePreview}
+                handleSuggestSubtitleKeywords={handleSuggestSubtitleKeywords}
+                rewriteTemplateTitleFromHook={rewriteTemplateTitleFromHook}
+                subtitleTemplates={subtitleTemplates}
+                templatePreviewOverrides={templatePreviewOverrides}
+                BUILTIN_SUBTITLE_TEMPLATES={BUILTIN_SUBTITLE_TEMPLATES}
+                SUBTITLE_PRESETS={SUBTITLE_PRESETS}
+                RESOLUTION_PRESETS={RESOLUTION_PRESETS}
+                SLIDE_MOTIONS={SLIDE_MOTIONS}
+                SLIDE_MOTION_ANIMATION={SLIDE_MOTION_ANIMATION}
+                PRESET_SAMPLE_TEXT={PRESET_SAMPLE_TEXT}
+                BGM_LIBRARY={BGM_LIBRARY}
+                SFX_LIBRARY={SFX_LIBRARY}
+                ratioToCss={ratioToCss}
+                gridPositionToPercent={gridPositionToPercent}
+                getBuiltinTemplatePreview={getBuiltinTemplatePreview}
+                syncReport={syncReport}
+                isOneClickFixed={isOneClickFixed}
+              />
             </div>
           )}
         </section>
