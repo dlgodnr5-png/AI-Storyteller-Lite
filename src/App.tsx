@@ -1913,6 +1913,7 @@ export default function App() {
       sfxMode: 'single' as 'single' | 'auto',
       bgmDuckingEnabled: true,
       bgmDuckingDb: 10,
+      exportSpeed: 1.25,
       useHybridHookVideos: true,
       hookVideoCount: 7,
     },
@@ -9239,45 +9240,349 @@ ${JSON.stringify(cutPayload)}`,
           {ui.panelsOpen.p13 && (
             <div className="space-y-4">
               <div className="rounded-2xl border border-rose-300/30 bg-rose-500/10 p-4 space-y-2">
-                <p className="text-[11px] font-black text-rose-100 uppercase tracking-widest">13번 = 12번 컨트롤 재사용 편집</p>
-                <p className="text-xs text-rose-100/90">13번은 렌더 자산 재편집 전용입니다. 아래 컨트롤은 12번과 동일 엔진을 직접 재사용합니다.</p>
+                <p className="text-[11px] font-black text-rose-100 uppercase tracking-widest">13번 = 렌더 결과 후편집 툴바</p>
+                <p className="text-xs text-rose-100/90">12번은 렌더 전 검수, 13번은 렌더 자산 후편집에 집중합니다. 미리보기 중복 마운트 없이 자막/폰트/텍스트/속도/내보내기만 경량 제어합니다.</p>
               </div>
-              <Panel12Section
-                ui={ui}
-                setUi={setUi}
-                PanelHeader={PanelHeader}
-                handleGenerateFinalVideo={handleGenerateFinalVideo}
-                handleExportSlideVideo={handleExportSlideVideo}
-                handleDownloadSrt={handleDownloadSrt}
-                canDownload={isApprovedUser}
-                handleConvertToMp4={handleConvertToMp4}
-                saveCurrentSubtitleTemplate={saveCurrentSubtitleTemplate}
-                applySubtitleTemplate={applySubtitleTemplate}
-                exportSubtitleTemplates={exportSubtitleTemplates}
-                importSubtitleTemplates={importSubtitleTemplates}
-                applySavedSubtitleTemplate={applySavedSubtitleTemplate}
-                removeSavedSubtitleTemplate={removeSavedSubtitleTemplate}
-                applyBuiltinSubtitleTemplate={applyBuiltinSubtitleTemplate}
-                handleTemplatePreviewUpload={handleTemplatePreviewUpload}
-                resetTemplatePreview={resetTemplatePreview}
-                handleSuggestSubtitleKeywords={handleSuggestSubtitleKeywords}
-                rewriteTemplateTitleFromHook={rewriteTemplateTitleFromHook}
-                subtitleTemplates={subtitleTemplates}
-                templatePreviewOverrides={templatePreviewOverrides}
-                BUILTIN_SUBTITLE_TEMPLATES={BUILTIN_SUBTITLE_TEMPLATES}
-                SUBTITLE_PRESETS={SUBTITLE_PRESETS}
-                RESOLUTION_PRESETS={RESOLUTION_PRESETS}
-                SLIDE_MOTIONS={SLIDE_MOTIONS}
-                SLIDE_MOTION_ANIMATION={SLIDE_MOTION_ANIMATION}
-                PRESET_SAMPLE_TEXT={PRESET_SAMPLE_TEXT}
-                BGM_LIBRARY={BGM_LIBRARY}
-                SFX_LIBRARY={SFX_LIBRARY}
-                ratioToCss={ratioToCss}
-                gridPositionToPercent={gridPositionToPercent}
-                getBuiltinTemplatePreview={getBuiltinTemplatePreview}
-                syncReport={syncReport}
-                isOneClickFixed={isOneClickFixed}
-              />
+
+              <div className="rounded-2xl border border-white/10 bg-black/25 p-4 space-y-3">
+                <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">렌더 액션</p>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  <button
+                    onClick={() => document.getElementById('panel-p12')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                    className="px-3 py-2 rounded-lg bg-rose-400 text-black text-xs font-black"
+                  >
+                    12번 상세 열기
+                  </button>
+                  <button
+                    onClick={handleGenerateFinalVideo}
+                    disabled={ui.finalVideo.generating || ui.imageJobs.filter((j: any) => j.imageUrl).length === 0}
+                    className="px-3 py-2 rounded-lg bg-emerald-400 text-black text-xs font-black disabled:opacity-40"
+                  >
+                    슬라이드 재구성
+                  </button>
+                  <button
+                    onClick={handleExportSlideVideo}
+                    disabled={ui.finalVideo.slides.length === 0}
+                    className="px-3 py-2 rounded-lg bg-blue-500 text-white text-xs font-black disabled:opacity-40"
+                  >
+                    {ui.finalVideo.generating ? '렌더 중지' : '렌더 실행'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!ui.finalVideo.url) {
+                        alert('먼저 렌더 결과를 생성하세요.');
+                        return;
+                      }
+                      if (!isApprovedUser) {
+                        alert('승인된 사용자만 다운로드할 수 있습니다.');
+                        return;
+                      }
+                      const a = document.createElement('a');
+                      a.href = ui.finalVideo.url;
+                      a.download = ui.finalVideo.outputFormat === 'mp4' ? 'final_slide_video.mp4' : 'final_slide_video.webm';
+                      a.click();
+                    }}
+                    disabled={!ui.finalVideo.url}
+                    className="px-3 py-2 rounded-lg bg-cyan-500 text-black text-xs font-black disabled:opacity-40"
+                  >
+                    결과 다운로드
+                  </button>
+                  <button
+                    onClick={handleConvertToMp4}
+                    disabled={!ui.finalVideo.url || ui.finalVideo.generating}
+                    className="px-3 py-2 rounded-lg bg-indigo-500 text-white text-xs font-black disabled:opacity-40"
+                  >
+                    {ui.finalVideo.transcoding ? 'MP4 변환 중지' : 'MP4 변환'}
+                  </button>
+                  <button
+                    onClick={handleDownloadSrt}
+                    disabled={ui.finalVideo.slides.length === 0 || !isApprovedUser}
+                    className="px-3 py-2 rounded-lg bg-white/10 border border-white/15 text-xs font-black text-slate-100 disabled:opacity-40"
+                  >
+                    SRT 다운로드
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-black/25 p-4 space-y-3">
+                <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">자막/폰트/속도</p>
+                <div className="rounded-xl border border-white/10 bg-black/30 p-3 space-y-2">
+                  <p className="text-[10px] text-slate-400">템플릿 빠른 적용</p>
+                  <div className="flex flex-wrap gap-1">
+                    {BUILTIN_SUBTITLE_TEMPLATES.slice(0, 8).map((template: any) => (
+                      <button
+                        key={template.id}
+                        onClick={() => applyBuiltinSubtitleTemplate(template.id)}
+                        className={`px-2 py-1 rounded-md text-[10px] font-black border ${ui.finalVideo.subtitleTemplateLockedId === template.id ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-white/5 text-slate-300 border-white/10'}`}
+                      >
+                        {template.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-white/10 bg-black/30 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-slate-200">자막 표시</span>
+                      <button
+                        onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitleEnabled: !prev.finalVideo.subtitleEnabled } }))}
+                        className={`px-3 py-1 rounded-md text-[10px] font-black ${ui.finalVideo.subtitleEnabled ? 'bg-emerald-400 text-black' : 'bg-white/10 text-slate-200'}`}
+                      >
+                        {ui.finalVideo.subtitleEnabled ? 'ON' : 'OFF'}
+                      </button>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-400">자막 스타일</label>
+                      <div className="grid grid-cols-3 gap-1">
+                        {(['shorts', 'docu', 'lecture', 'impact', 'neon'] as SubtitlePreset[]).map((presetId) => (
+                          <button
+                            key={presetId}
+                            onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitlePreset: presetId } }))}
+                            className={`px-2 py-1 rounded-md text-[10px] font-black border ${ui.finalVideo.subtitlePreset === presetId ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-white/5 text-slate-300 border-white/10'}`}
+                          >
+                            {SUBTITLE_PRESETS[presetId].label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-400">자막 위치 {ui.finalVideo.subtitleGridPosition}</label>
+                      <input
+                        type="range"
+                        min={1}
+                        max={10}
+                        step={1}
+                        value={Number(ui.finalVideo.subtitleGridPosition || 7)}
+                        onChange={(e) => {
+                          const nextPos = Math.max(1, Math.min(10, Number(e.target.value || 7)));
+                          setUi((prev: any) => ({
+                            ...prev,
+                            finalVideo: {
+                              ...prev.finalVideo,
+                              subtitleGridPosition: nextPos,
+                              subtitlePosition: nextPos <= 5 ? 'middle' : 'bottom',
+                            },
+                          }));
+                        }}
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-black/30 p-3 space-y-2">
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] text-slate-400">템플릿 제목</label>
+                        <button
+                          onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleEnabled: !prev.finalVideo.templateTitleEnabled } }))}
+                          className={`px-2 py-1 rounded-md text-[10px] font-black ${ui.finalVideo.templateTitleEnabled ? 'bg-emerald-400 text-black' : 'bg-white/10 text-slate-200'}`}
+                        >
+                          {ui.finalVideo.templateTitleEnabled ? 'ON' : 'OFF'}
+                        </button>
+                      </div>
+                      <input
+                        value={String(ui.finalVideo.templateTitleText || '')}
+                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleText: e.target.value } }))}
+                        placeholder="제목 문구 입력"
+                        className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-400">타이틀 폰트</label>
+                      <select
+                        value={String(ui.finalVideo.templateTitleFontFamily || '아네모네')}
+                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleFontFamily: e.target.value } }))}
+                        className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px]"
+                      >
+                        <option value="아네모네">아네모네</option>
+                        <option value="Pretendard">Pretendard</option>
+                        <option value="Noto Sans KR">Noto Sans KR</option>
+                        <option value="Do Hyeon">Do Hyeon</option>
+                        <option value="Jua">Jua</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-400">내보내기 재생속도 {Number(ui.finalVideo.exportSpeed || 1).toFixed(2)}x</label>
+                      <input
+                        type="range"
+                        min={0.75}
+                        max={1.5}
+                        step={0.05}
+                        value={Number(ui.finalVideo.exportSpeed || 1)}
+                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, exportSpeed: Number(e.target.value || 1) } }))}
+                        className="w-full"
+                      />
+                    </div>
+                    {ui.finalVideo.ffmpegNote && (
+                      <p className="text-[10px] text-indigo-200 bg-indigo-500/10 border border-indigo-400/20 rounded-lg px-2 py-1">
+                        {ui.finalVideo.ffmpegNote}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-black/25 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">추가 텍스트 오버레이</p>
+                  <button
+                    onClick={() => {
+                      const text = window.prompt('추가 텍스트를 입력하세요.')?.trim();
+                      if (!text) return;
+                      setUi((prev: any) => ({
+                        ...prev,
+                        finalVideo: {
+                          ...prev.finalVideo,
+                          textOverlays: [
+                            ...(prev.finalVideo.textOverlays || []),
+                            {
+                              id: `p13-${Date.now()}`,
+                              text,
+                              color: '#ffffff',
+                              bgColor: '#0f172a',
+                              scale: 1,
+                              gridPosition: 7,
+                              align: 'center',
+                            },
+                          ],
+                        },
+                      }));
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-400 text-black text-[10px] font-black"
+                  >
+                    텍스트 추가
+                  </button>
+                </div>
+                {(ui.finalVideo.textOverlays || []).length === 0 && (
+                  <p className="text-[10px] text-slate-500">추가된 텍스트가 없습니다.</p>
+                )}
+                <div className="space-y-2">
+                  {(ui.finalVideo.textOverlays || []).map((item: any) => (
+                    <div key={item.id} className="rounded-xl border border-white/10 bg-black/30 p-3 space-y-2">
+                      <div className="flex gap-2">
+                        <input
+                          value={String(item.text || '')}
+                          onChange={(e) => setUi((prev: any) => ({
+                            ...prev,
+                            finalVideo: {
+                              ...prev.finalVideo,
+                              textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, text: e.target.value } : t),
+                            },
+                          }))}
+                          className="flex-1 bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px]"
+                          placeholder="텍스트"
+                        />
+                        <button
+                          onClick={() => setUi((prev: any) => ({
+                            ...prev,
+                            finalVideo: {
+                              ...prev.finalVideo,
+                              textOverlays: (prev.finalVideo.textOverlays || []).filter((t: any) => t.id !== item.id),
+                            },
+                          }))}
+                          className="px-2 py-2 rounded-lg bg-rose-500 text-white"
+                          title="삭제"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
+                        <label className="flex items-center gap-2 bg-black/30 border border-white/10 rounded-lg px-2 py-1">
+                          글자
+                          <input
+                            type="color"
+                            value={String(item.color || '#ffffff')}
+                            onChange={(e) => setUi((prev: any) => ({
+                              ...prev,
+                              finalVideo: {
+                                ...prev.finalVideo,
+                                textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, color: e.target.value } : t),
+                              },
+                            }))}
+                            className="w-6 h-5 bg-transparent border-0"
+                          />
+                        </label>
+                        <label className="flex items-center gap-2 bg-black/30 border border-white/10 rounded-lg px-2 py-1">
+                          배경
+                          <input
+                            type="color"
+                            value={String(item.bgColor || '#0f172a')}
+                            onChange={(e) => setUi((prev: any) => ({
+                              ...prev,
+                              finalVideo: {
+                                ...prev.finalVideo,
+                                textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, bgColor: e.target.value } : t),
+                              },
+                            }))}
+                            className="w-6 h-5 bg-transparent border-0"
+                          />
+                        </label>
+                        <label className="flex items-center gap-2 bg-black/30 border border-white/10 rounded-lg px-2 py-1">
+                          크기
+                          <input
+                            type="number"
+                            min="0.7"
+                            max="2.2"
+                            step="0.1"
+                            value={Number(item.scale || 1)}
+                            onChange={(e) => setUi((prev: any) => ({
+                              ...prev,
+                              finalVideo: {
+                                ...prev.finalVideo,
+                                textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, scale: Number(e.target.value || 1) } : t),
+                              },
+                            }))}
+                            className="w-full bg-transparent outline-none"
+                          />
+                        </label>
+                        <label className="flex items-center gap-2 bg-black/30 border border-white/10 rounded-lg px-2 py-1">
+                          위치
+                          <input
+                            type="number"
+                            min="1"
+                            max="10"
+                            step="1"
+                            value={Number(item.gridPosition || 7)}
+                            onChange={(e) => setUi((prev: any) => ({
+                              ...prev,
+                              finalVideo: {
+                                ...prev.finalVideo,
+                                textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, gridPosition: Number(e.target.value || 7) } : t),
+                              },
+                            }))}
+                            className="w-full bg-transparent outline-none"
+                          />
+                        </label>
+                        <label className="flex items-center gap-2 bg-black/30 border border-white/10 rounded-lg px-2 py-1 md:col-span-2">
+                          정렬
+                          <select
+                            value={String(item.align || 'center')}
+                            onChange={(e) => setUi((prev: any) => ({
+                              ...prev,
+                              finalVideo: {
+                                ...prev.finalVideo,
+                                textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, align: e.target.value } : t),
+                              },
+                            }))}
+                            className="flex-1 bg-transparent outline-none"
+                          >
+                            <option value="left">left</option>
+                            <option value="center">center</option>
+                            <option value="right">right</option>
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
+                <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">이미지 자산: <span className="font-black text-white">{ui.imageJobs.filter((j: any) => j.imageUrl).length}</span></div>
+                <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">영상 자산: <span className="font-black text-white">{ui.videoJobs.filter((j: any) => j.videoUrl).length}</span></div>
+                <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">컷 수: <span className="font-black text-white">{ui.cuts.items.length}</span></div>
+                <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">TTS 길이: <span className="font-black text-white">{ui.tts.measuredDuration > 0 ? `${ui.tts.measuredDuration.toFixed(1)}초` : '미측정'}</span></div>
+              </div>
             </div>
           )}
         </section>

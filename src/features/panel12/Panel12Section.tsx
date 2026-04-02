@@ -35,6 +35,12 @@ const mmToPxScaled = (mm: number, width: number) => mm * MM_TO_PX_1080 * (width 
 
 const normalizeSubtitleText = (text: string) => String(text || '').replace(/\s+/g, ' ').trim();
 
+const cleanWordToken = (word: string) =>
+  String(word || '')
+    .toLowerCase()
+    .replace(/[.,!?;:()"'“”‘’\[\]{}<>]/g, '')
+    .trim();
+
 const splitSubtitleLines = (text: string, maxChars: number) => {
   const manualLines = String(text || '')
     .split(/\r?\n/)
@@ -258,18 +264,25 @@ export default function Panel12Section(props: Props) {
   }, [ui.finalVideo.templateTitleText]);
 
   const previewExtraOverlays = React.useMemo(() => {
-    const preset = SUBTITLE_PRESETS[ui.finalVideo.subtitlePreset] as any;
-    const baseScale = Number(preset?.fontScale || 0.045);
+    const previewHeight = previewFrameWidth * (16 / 9);
     return (ui.finalVideo.textOverlays || [])
       .map((item: any) => ({
         ...item,
         text: String(item?.text || ''),
         scale: Math.max(TEXT_SCALE_MIN, Math.min(TEXT_SCALE_MAX, Number(item?.scale || 1))),
-        fontPx: Math.max(10, Math.round(previewFrameWidth * baseScale * Math.max(TEXT_SCALE_MIN, Math.min(TEXT_SCALE_MAX, Number(item?.scale || 1))))),
+        fontPx: Math.max(
+          12,
+          Math.round(
+            Math.min(previewFrameWidth, previewHeight) *
+              0.038 *
+              Math.max(TEXT_SCALE_MIN, Math.min(TEXT_SCALE_MAX, Number(item?.scale || 1))),
+          ),
+        ),
         gridPosition: Math.min(10, Math.max(1, Number(item?.gridPosition || 7))),
+        align: ['left', 'center', 'right'].includes(String(item?.align || 'center')) ? String(item.align) : 'center',
       }))
       .filter((item: any) => item.text.trim().length > 0);
-  }, [ui.finalVideo.textOverlays, ui.finalVideo.subtitlePreset, previewFrameWidth, SUBTITLE_PRESETS]);
+  }, [ui.finalVideo.textOverlays, previewFrameWidth]);
 
   const previewTitleTopPercent = React.useMemo(() => {
     const previewHeight = previewFrameWidth * (16 / 9);
@@ -277,6 +290,11 @@ export default function Panel12Section(props: Props) {
     const topPx = mmToPxScaled(topMm, previewFrameWidth);
     return Math.max(1, Math.min(95, (topPx / Math.max(1, previewHeight)) * 100));
   }, [previewFrameWidth, ui.finalVideo.templateTitleLine1TopMm]);
+
+  const previewTitleHighlightToken = React.useMemo(
+    () => cleanWordToken(String(ui.finalVideo.templateTitleHighlightWord || '')),
+    [ui.finalVideo.templateTitleHighlightWord],
+  );
 
   const jumpToEditorSection = (id: string) => {
     const target = document.getElementById(id);
@@ -1432,9 +1450,28 @@ export default function Panel12Section(props: Props) {
                             overflowWrap: 'anywhere',
                           }}
                         >
-                          {(previewTitleLines.length > 0 ? previewTitleLines : ['']).map((line, idx) => (
-                            <span key={`${line}-${idx}`} className="block">{line}</span>
-                          ))}
+                          {(previewTitleLines.length > 0 ? previewTitleLines : ['']).map((line, idx) => {
+                            const lineColor = idx === 0
+                              ? (ui.finalVideo.templateTitleLine1Color || '#ef4444')
+                              : (ui.finalVideo.templateTitleLine2Color || '#111111');
+                            const parts = String(line || '').split(/(\s+)/);
+                            return (
+                              <span key={`${line}-${idx}`} className="block" style={{ color: lineColor }}>
+                                {parts.map((part, partIdx) => {
+                                  const token = cleanWordToken(part);
+                                  const isHighlight = Boolean(previewTitleHighlightToken && token && token === previewTitleHighlightToken);
+                                  return (
+                                    <span
+                                      key={`${part}-${partIdx}`}
+                                      style={{ color: isHighlight ? (ui.finalVideo.templateTitleHighlightColor || '#fde047') : lineColor }}
+                                    >
+                                      {part}
+                                    </span>
+                                  );
+                                })}
+                              </span>
+                            );
+                          })}
                         </p>
                       </div>
                     )}
