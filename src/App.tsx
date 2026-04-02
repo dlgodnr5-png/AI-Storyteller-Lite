@@ -208,6 +208,8 @@ const resolveVideoCutDurationSec = (scriptType?: string) =>
     ? LONGFORM_VIDEO_DURATION_SEC
     : SHORTS_VIDEO_DURATION_SEC;
 
+const AUTO_DONE_MESSAGE = '설명: 자동생성이 완료되었습니다. 상세 설정 마무리 하시고 슬라이드 구성과 렌더링을 마무리 하세요.';
+
 const getSlideTimelineDurationSec = (slide: any, fallback: number) => {
   if (Number(slide?.duration || 0) > 0) return Math.max(0.2, Number(slide.duration));
   if (slide?.mediaType === 'video' && Number(slide?.videoDurationSec || 0) > 0) {
@@ -2946,7 +2948,16 @@ ${ui.selectedHookTitle}
       const finalScript = ui.script.type === 'shorts'
         ? trimScriptToUnitLimit(rawScript, lang, shortsLimit.maxUnits)
         : rawScript;
-      setUi(prev => ({ ...prev, script: { ...prev.script, output: finalScript, generating: false, lastError: '' } }));
+      setUi(prev => ({
+        ...prev,
+        script: { ...prev.script, output: finalScript, generating: false, lastError: '' },
+        tts: {
+          ...prev.tts,
+          audioUrl: '',
+          measuredDuration: 0,
+          status: '대본 변경됨 (TTS 재생성 필요)',
+        },
+      }));
     } catch (err) {
       console.error(err);
       const message = err instanceof Error ? err.message : String(err || 'script-error');
@@ -3535,9 +3546,13 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       .map(v => v.trim())
       .filter(v => v.length > 1);
 
-    const items = !isShorts
-      ? rebalanceCutsToTarget(baseItems, Math.max(1, Math.round((Number(ui.tts.measuredDuration || 0) > 0 ? Number(ui.tts.measuredDuration || 0) : Number(scriptMetrics.sec1x || 0)) / 30)))
-      : baseItems;
+    const ttsDuration = Math.max(0, Number(ui.tts.measuredDuration || 0));
+    const shortsTargetCuts = ttsDuration > 0
+      ? Math.max(3, Math.min(24, Math.round(ttsDuration / IMAGE_SLIDE_DURATION_SEC)))
+      : 0;
+    const items = isShorts
+      ? (shortsTargetCuts > 0 ? rebalanceCutsToTarget(baseItems, shortsTargetCuts) : baseItems)
+      : rebalanceCutsToTarget(baseItems, Math.max(1, Math.round((ttsDuration > 0 ? ttsDuration : Number(scriptMetrics.sec1x || 0)) / 30)));
 
     if (items.length === 0) {
       setUi(prev => ({ ...prev, cuts: { ...prev.cuts, splitting: false } }));
@@ -3961,7 +3976,16 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
         const lang = (['KR', 'EN', 'JP'].includes(latestUiRef.current?.script?.lang) ? latestUiRef.current?.script?.lang : 'KR') as 'KR' | 'EN' | 'JP';
         const targetSeconds = Math.max(18, Math.min(30, Number(opts?.productTargetSeconds ?? 20)));
         const trimmed = trimScriptToSeconds(latestUiRef.current?.script?.output || '', lang, targetSeconds);
-        setUi(prev => ({ ...prev, script: { ...prev.script, output: trimmed } }));
+        setUi(prev => ({
+          ...prev,
+          script: { ...prev.script, output: trimmed },
+          tts: {
+            ...prev.tts,
+            audioUrl: '',
+            measuredDuration: 0,
+            status: '대본 변경됨 (TTS 재생성 필요)',
+          },
+        }));
         await new Promise(r => setTimeout(r, 0));
       }
 
@@ -4192,9 +4216,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, running: false, step: '12단계 완료', error: '' } }));
       appendAutoLog('자동 진행 12단계 완료 (최종 렌더/발행은 수동 확인)');
       showNotice('자동 진행 12단계 완료: 13번 편집 후 14번 발행하세요.', 'success');
-      if (!opts?.productMode) {
-        setAutoDoneModalText('자동 제작이 완료되었습니다. 12번으로 이동해 수정사항이 없으면 [슬라이드 구성]을 클릭하세요.');
-      }
+      setAutoDoneModalText(AUTO_DONE_MESSAGE);
       await persistAutoSnapshot(8, 'done');
       await clearAutoSnapshot();
       return true;
@@ -4218,6 +4240,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
         }));
         appendAutoLog('자동 진행 경고 종료: 일부 단계 오류가 있었지만 생성 결과를 유지합니다.');
         showNotice('일부 단계 경고가 있었지만 생성 결과를 유지했습니다. 12~14번에서 최종 확인해 주세요.', 'info', 1400);
+        setAutoDoneModalText(AUTO_DONE_MESSAGE);
         await persistAutoSnapshot(8, 'done');
         await clearAutoSnapshot();
         return true;
@@ -4672,7 +4695,7 @@ JSON만 반환:
         },
       }));
       appendAutoLog('상품홍보 원클릭 완료');
-      setAutoDoneModalText('자동 제작이 완료되었습니다. 12번으로 이동해 수정사항이 없으면 [슬라이드 구성]을 클릭하세요.');
+      setAutoDoneModalText(AUTO_DONE_MESSAGE);
 
       if (latestUiRef.current?.productPromo?.autoQueuePublish) {
         const scheduleMinutes = [30, 60, 120].includes(Number(latestUiRef.current?.productPromo?.autoScheduleMinutes))
