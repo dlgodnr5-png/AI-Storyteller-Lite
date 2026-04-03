@@ -1546,6 +1546,19 @@ const BUILTIN_TEMPLATE_LAYOUTS: Record<string, BuiltinSubtitleTemplate['layout']
   'kids-family': { ...DEFAULT_TEMPLATE_LAYOUT, title: { ...DEFAULT_TEMPLATE_LAYOUT.title, scale: 1.85, topMm: 58, line1Color: '#22c55e', line2Color: '#ffffff' }, subtitle: { ...DEFAULT_TEMPLATE_LAYOUT.subtitle, preset: 'lecture', maxChars: 22, scale: 1.02, gridPosition: 9, entryAnimation: 'slide_right' } },
 };
 
+const validateTemplateLayout = (layout: BuiltinSubtitleTemplate['layout'] | undefined) => {
+  if (!layout) return false;
+  const c = layout.videoContainer;
+  const t = layout.title;
+  const s = layout.subtitle;
+  const containerOk =
+    Number.isFinite(c.xPct) && Number.isFinite(c.yPct) && Number.isFinite(c.widthPct) && Number.isFinite(c.heightPct) && Number.isFinite(c.radiusPx) &&
+    c.xPct >= 0 && c.xPct <= 100 && c.yPct >= 0 && c.yPct <= 100 && c.widthPct > 0 && c.widthPct <= 100 && c.heightPct > 0 && c.heightPct <= 100;
+  const titleOk = Number.isFinite(t.maxLines) && t.maxLines >= 1 && t.maxLines <= 4 && Number.isFinite(t.scale) && t.scale > 0;
+  const subtitleOk = Number.isFinite(s.gridPosition) && s.gridPosition >= 1 && s.gridPosition <= 10 && Number.isFinite(s.scale) && s.scale > 0 && Number.isFinite(s.maxChars) && s.maxChars >= 8;
+  return containerOk && titleOk && subtitleOk;
+};
+
 const BUILTIN_SUBTITLE_TEMPLATES: BuiltinSubtitleTemplate[] = [
   { id: 'default-basic', name: '00 기본', description: '기본 레이아웃 템플릿', sample: '핵심만 빠르게 전달', previewImage: '/subtitle_templates/00 기본.jpg', config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleGridPosition: 9, subtitleMaxChars: 24, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '핵심,중요,요약', subtitleUsePerCutKeywords: false }, layout: BUILTIN_TEMPLATE_LAYOUTS['default-basic'] },
   { id: 'promo-product', name: '상품광고', description: '강한 CTA, 빠른 강조, 전환 유도', sample: '지금 안 보면 손해! 오늘만 특가', previewImage: '/subtitle_templates/09. 상품.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleGridPosition: 9, subtitleMaxChars: 18, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_up', subtitleKeywords: '한정,특가,무료,지금,혜택', subtitleUsePerCutKeywords: false }, layout: BUILTIN_TEMPLATE_LAYOUTS['promo-product'] },
@@ -3807,6 +3820,37 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       return;
     }
     await handleGenerateGeminiTTS();
+  };
+
+  const runOneClickFixedHealthCheck = () => {
+    const issues: string[] = [];
+    if (!ui.autoFlow.fixedEnabled) {
+      issues.push('원클릭 고정이 OFF 상태입니다.');
+    }
+
+    const fixedProvider = ui.autoFlow.fixed.ttsProvider === 'elevenlabs' ? 'elevenlabs' : 'gemini';
+    const activeProvider = ui.tts.activeProvider === 'elevenlabs' ? 'elevenlabs' : 'gemini';
+    if (ui.autoFlow.fixedEnabled && fixedProvider !== activeProvider) {
+      issues.push(`고정 TTS 엔진(${fixedProvider})과 활성 엔진(${activeProvider})이 다릅니다.`);
+    }
+
+    if (fixedProvider === 'gemini' && !GEMINI_TTS_VOICES.some(v => v.id === ui.autoFlow.fixed.ttsVoice)) {
+      issues.push('고정 Gemini 목소리 값이 유효하지 않습니다.');
+    }
+    if (fixedProvider === 'elevenlabs' && !ELEVENLABS_VOICES.some(v => v.id === ui.autoFlow.fixed.elevenlabsVoice)) {
+      issues.push('고정 ElevenLabs 목소리 값이 유효하지 않습니다.');
+    }
+
+    const invalidTemplateCount = BUILTIN_SUBTITLE_TEMPLATES.filter(t => !validateTemplateLayout(t.layout)).length;
+    if (invalidTemplateCount > 0) {
+      issues.push(`레이아웃 누락/오류 템플릿 ${invalidTemplateCount}개가 있습니다.`);
+    }
+
+    if (issues.length > 0) {
+      showNotice(`원클릭 고정 테스트 경고: ${issues.join(' / ')}`, 'error');
+      return;
+    }
+    showNotice('원클릭 고정 테스트 통과: 엔진/보이스/템플릿 레이아웃 상태 정상', 'success');
   };
 
   const splitCuts = async () => {
@@ -8123,56 +8167,65 @@ ${JSON.stringify(cutPayload)}`,
                   {ui.autoFlow.step && <p className="text-[11px] text-emerald-300 font-bold mt-1">진행 단계: {ui.autoFlow.step}</p>}
                   {ui.autoFlow.error && <p className="text-[11px] text-rose-300 font-bold mt-1">오류: {ui.autoFlow.error}</p>}
                 </div>
-                <button
-                  onClick={() => setUi(prev => ({
-                    ...prev,
-                    autoFlow: {
-                      ...prev.autoFlow,
-                      fixedEnabled: !prev.autoFlow.fixedEnabled,
-                    },
-                    ...(prev.autoFlow.fixedEnabled
-                      ? {}
-                      : {
-                          script: {
-                            ...prev.script,
-                            type: prev.autoFlow.fixed.scriptType || prev.script.type,
-                            length: prev.autoFlow.fixed.scriptLength || prev.script.length,
-                            lang: prev.autoFlow.fixed.scriptLang || prev.script.lang,
-                          },
-                          videoStyle: {
-                            ...prev.videoStyle,
-                            selected: prev.autoFlow.fixed.videoStyle || prev.videoStyle.selected,
-                          },
-                          tts: {
-                            ...prev.tts,
-                            voice: prev.autoFlow.fixed.ttsProvider === 'gemini'
-                              ? (prev.autoFlow.fixed.ttsVoice || prev.tts.voice)
-                              : prev.tts.voice,
-                            elevenlabsVoice: prev.autoFlow.fixed.ttsProvider === 'elevenlabs'
-                              ? (prev.autoFlow.fixed.elevenlabsVoice || prev.tts.elevenlabsVoice)
-                              : prev.tts.elevenlabsVoice,
-                          },
-                          cuts: {
-                            ...prev.cuts,
-                            ratio: prev.autoFlow.fixed.ratio || prev.cuts.ratio,
-                          },
-                          thumbnail: {
-                            ...prev.thumbnail,
-                            ratio: prev.autoFlow.fixed.ratio || prev.thumbnail.ratio,
-                          },
-                          finalVideo: {
-                            ...prev.finalVideo,
-                            bgmEnabled: Boolean(prev.autoFlow.fixed.bgmTrack),
-                            bgmTrack: prev.autoFlow.fixed.bgmTrack || prev.finalVideo.bgmTrack,
-                            bgmTrackUserSelected: true,
-                            sfxEnabled: false,
-                          },
-                        }),
-                  }))}
-                  className={`px-4 py-2 rounded-xl text-xs font-black border transition-all ${ui.autoFlow.fixedEnabled ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-white/5 text-slate-200 border-white/10 hover:bg-white/10'}`}
-                >
-                  원클릭 고정 {ui.autoFlow.fixedEnabled ? 'ON' : 'OFF'}
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={runOneClickFixedHealthCheck}
+                    className="px-4 py-2 rounded-xl text-xs font-black border transition-all bg-black/30 text-cyan-200 border-cyan-300/30 hover:bg-cyan-500/10"
+                  >
+                    원클릭 고정 테스트
+                  </button>
+                  <button
+                    onClick={() => setUi(prev => ({
+                      ...prev,
+                      autoFlow: {
+                        ...prev.autoFlow,
+                        fixedEnabled: !prev.autoFlow.fixedEnabled,
+                      },
+                      ...(prev.autoFlow.fixedEnabled
+                        ? {}
+                        : {
+                            script: {
+                              ...prev.script,
+                              type: prev.autoFlow.fixed.scriptType || prev.script.type,
+                              length: prev.autoFlow.fixed.scriptLength || prev.script.length,
+                              lang: prev.autoFlow.fixed.scriptLang || prev.script.lang,
+                            },
+                            videoStyle: {
+                              ...prev.videoStyle,
+                              selected: prev.autoFlow.fixed.videoStyle || prev.videoStyle.selected,
+                            },
+                            tts: {
+                              ...prev.tts,
+                              activeProvider: prev.autoFlow.fixed.ttsProvider === 'elevenlabs' ? 'elevenlabs' : 'gemini',
+                              voice: prev.autoFlow.fixed.ttsProvider === 'gemini'
+                                ? (prev.autoFlow.fixed.ttsVoice || prev.tts.voice)
+                                : prev.tts.voice,
+                              elevenlabsVoice: prev.autoFlow.fixed.ttsProvider === 'elevenlabs'
+                                ? (prev.autoFlow.fixed.elevenlabsVoice || prev.tts.elevenlabsVoice)
+                                : prev.tts.elevenlabsVoice,
+                            },
+                            cuts: {
+                              ...prev.cuts,
+                              ratio: prev.autoFlow.fixed.ratio || prev.cuts.ratio,
+                            },
+                            thumbnail: {
+                              ...prev.thumbnail,
+                              ratio: prev.autoFlow.fixed.ratio || prev.thumbnail.ratio,
+                            },
+                            finalVideo: {
+                              ...prev.finalVideo,
+                              bgmEnabled: Boolean(prev.autoFlow.fixed.bgmTrack),
+                              bgmTrack: prev.autoFlow.fixed.bgmTrack || prev.finalVideo.bgmTrack,
+                              bgmTrackUserSelected: true,
+                              sfxEnabled: false,
+                            },
+                          }),
+                    }))}
+                    className={`px-4 py-2 rounded-xl text-xs font-black border transition-all ${ui.autoFlow.fixedEnabled ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-white/5 text-slate-200 border-white/10 hover:bg-white/10'}`}
+                  >
+                    원클릭 고정 {ui.autoFlow.fixedEnabled ? 'ON' : 'OFF'}
+                  </button>
+                </div>
               </div>
 
               <div className="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-4 space-y-3">
@@ -8297,6 +8350,7 @@ ${JSON.stringify(cutPayload)}`,
                         onChange={(e) => setUi(prev => ({
                           ...prev,
                           autoFlow: { ...prev.autoFlow, fixed: { ...prev.autoFlow.fixed, ttsProvider: e.target.value as any } },
+                          tts: { ...prev.tts, activeProvider: e.target.value === 'elevenlabs' ? 'elevenlabs' : 'gemini' },
                         }))}
                         className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none"
                       >
