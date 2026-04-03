@@ -427,6 +427,32 @@ type BuiltinSubtitleTemplate = {
   sample: string;
   previewImage?: string;
   config: Omit<SavedSubtitleTemplate, 'name'>;
+  layout?: {
+    videoContainer: {
+      xPct: number;
+      yPct: number;
+      widthPct: number;
+      heightPct: number;
+      radiusPx: number;
+    };
+    title: {
+      maxLines: number;
+      scale: number;
+      topMm: number;
+      line2BottomMm: number;
+      line1Color: string;
+      line2Color: string;
+      highlightColor: string;
+      strokeColor: string;
+    };
+    subtitle: {
+      scale: number;
+      gridPosition: number;
+      maxChars: number;
+      preset: SubtitlePreset;
+      entryAnimation: SubtitleEntryAnimation;
+    };
+  };
 };
 
 const SLIDE_MOTIONS: { id: SlideMotionType; label: string }[] = [
@@ -1088,13 +1114,15 @@ const drawTemplateTitleOverlay = (
     highlightWord: string;
     scale: number;
     subtitlePreset?: SubtitlePreset;
+    maxLines?: number;
   },
 ) => {
   const rawLines = text
     .split(/\r?\n/)
     .map(v => normalizeSubtitleText(v))
     .filter(Boolean);
-  const lines = rawLines.length > 0 ? rawLines.slice(0, 4) : [normalizeHookTitleForOverlay(text)];
+  const maxLines = Math.max(1, Math.min(4, Number(options.maxLines || 2)));
+  const lines = rawLines.length > 0 ? rawLines.slice(0, maxLines) : [normalizeHookTitleForOverlay(text)];
   if (lines.length === 0) return;
 
   const maxTextWidth = Math.round(width * 0.84);
@@ -1143,7 +1171,7 @@ const drawTemplateTitleOverlay = (
   let metrics = measure();
   ctx.save();
   ctx.font = `900 ${fontPx}px "${fontFamily}", "Pretendard", "Noto Sans KR", sans-serif`;
-  clampedLines = lines.flatMap(line => wrapLineByWidth(line)).slice(0, 4);
+  clampedLines = lines.flatMap(line => wrapLineByWidth(line)).slice(0, maxLines);
   ctx.restore();
   let secondBottom = topPx + metrics.ascent + (Math.max(1, clampedLines.length) - 1) * metrics.lineHeight + metrics.descent;
   while (secondBottom > bottomLimitPx && fontPx > 10) {
@@ -1151,7 +1179,7 @@ const drawTemplateTitleOverlay = (
     metrics = measure();
     ctx.save();
     ctx.font = `900 ${fontPx}px "${fontFamily}", "Pretendard", "Noto Sans KR", sans-serif`;
-    clampedLines = lines.flatMap(line => wrapLineByWidth(line)).slice(0, 4);
+    clampedLines = lines.flatMap(line => wrapLineByWidth(line)).slice(0, maxLines);
     ctx.restore();
     secondBottom = topPx + metrics.ascent + (Math.max(1, clampedLines.length) - 1) * metrics.lineHeight + metrics.descent;
   }
@@ -1479,22 +1507,61 @@ const PRESET_SAMPLE_TEXT: Record<SubtitlePreset, string> = {
   neon: '트렌디한 네온 포인트로 집중도 상승',
 };
 
+const DEFAULT_TEMPLATE_LAYOUT = {
+  videoContainer: { xPct: 0, yPct: 0, widthPct: 100, heightPct: 100, radiusPx: 0 },
+  title: {
+    maxLines: 2,
+    scale: 2,
+    topMm: 60,
+    line2BottomMm: 96,
+    line1Color: '#ef4444',
+    line2Color: '#111111',
+    highlightColor: '#fde047',
+    strokeColor: 'rgba(0,0,0,0.92)',
+  },
+  subtitle: {
+    scale: 1,
+    gridPosition: 8,
+    maxChars: 24,
+    preset: 'shorts' as SubtitlePreset,
+    entryAnimation: 'fade' as SubtitleEntryAnimation,
+  },
+};
+
+const BUILTIN_TEMPLATE_LAYOUTS: Record<string, BuiltinSubtitleTemplate['layout']> = {
+  'default-basic': { ...DEFAULT_TEMPLATE_LAYOUT },
+  'promo-product': { ...DEFAULT_TEMPLATE_LAYOUT, title: { ...DEFAULT_TEMPLATE_LAYOUT.title, scale: 2.1, topMm: 54 }, subtitle: { ...DEFAULT_TEMPLATE_LAYOUT.subtitle, preset: 'shorts', maxChars: 18, scale: 1.08, gridPosition: 9, entryAnimation: 'slide_up' } },
+  'news-urgent': { ...DEFAULT_TEMPLATE_LAYOUT, videoContainer: { xPct: 4, yPct: 9, widthPct: 92, heightPct: 78, radiusPx: 18 }, title: { ...DEFAULT_TEMPLATE_LAYOUT.title, scale: 1.45, topMm: 24, line1Color: '#f8fafc', line2Color: '#cbd5e1' }, subtitle: { ...DEFAULT_TEMPLATE_LAYOUT.subtitle, preset: 'docu', maxChars: 26, scale: 0.95, gridPosition: 8, entryAnimation: 'fade' } },
+  'comedy-skit': { ...DEFAULT_TEMPLATE_LAYOUT, title: { ...DEFAULT_TEMPLATE_LAYOUT.title, scale: 1.9, topMm: 58, line1Color: '#fef08a', line2Color: '#ffffff' }, subtitle: { ...DEFAULT_TEMPLATE_LAYOUT.subtitle, preset: 'shorts', maxChars: 20, scale: 1.05, gridPosition: 6, entryAnimation: 'pop' } },
+  'pet-animal': { ...DEFAULT_TEMPLATE_LAYOUT, title: { ...DEFAULT_TEMPLATE_LAYOUT.title, scale: 1.85, topMm: 56, line1Color: '#fcd34d', line2Color: '#ffffff' }, subtitle: { ...DEFAULT_TEMPLATE_LAYOUT.subtitle, preset: 'shorts', maxChars: 19, scale: 1.0, gridPosition: 8, entryAnimation: 'slide_right' } },
+  'senior-health': { ...DEFAULT_TEMPLATE_LAYOUT, videoContainer: { xPct: 3, yPct: 6, widthPct: 94, heightPct: 84, radiusPx: 20 }, title: { ...DEFAULT_TEMPLATE_LAYOUT.title, scale: 1.45, topMm: 28, line1Color: '#f8fafc', line2Color: '#e2e8f0' }, subtitle: { ...DEFAULT_TEMPLATE_LAYOUT.subtitle, preset: 'lecture', maxChars: 30, scale: 0.92, gridPosition: 6, entryAnimation: 'fade' } },
+  motivation: { ...DEFAULT_TEMPLATE_LAYOUT, title: { ...DEFAULT_TEMPLATE_LAYOUT.title, scale: 2.2, topMm: 52, line1Color: '#f97316', line2Color: '#111827' }, subtitle: { ...DEFAULT_TEMPLATE_LAYOUT.subtitle, preset: 'shorts', maxChars: 22, scale: 1.1, gridPosition: 5, entryAnimation: 'slide_left' } },
+  'knowledge-bite': { ...DEFAULT_TEMPLATE_LAYOUT, videoContainer: { xPct: 2, yPct: 4, widthPct: 96, heightPct: 88, radiusPx: 14 }, title: { ...DEFAULT_TEMPLATE_LAYOUT.title, scale: 1.55, topMm: 32, line1Color: '#93c5fd', line2Color: '#f8fafc' }, subtitle: { ...DEFAULT_TEMPLATE_LAYOUT.subtitle, preset: 'docu', maxChars: 27, scale: 0.98, gridPosition: 8, entryAnimation: 'fade' } },
+  'review-tech': { ...DEFAULT_TEMPLATE_LAYOUT, videoContainer: { xPct: 2, yPct: 6, widthPct: 96, heightPct: 86, radiusPx: 14 }, title: { ...DEFAULT_TEMPLATE_LAYOUT.title, scale: 1.7, topMm: 32, line1Color: '#22d3ee', line2Color: '#ffffff' }, subtitle: { ...DEFAULT_TEMPLATE_LAYOUT.subtitle, preset: 'lecture', maxChars: 24, scale: 1.0, gridPosition: 9, entryAnimation: 'slide_up' } },
+  'vlog-daily': { ...DEFAULT_TEMPLATE_LAYOUT, title: { ...DEFAULT_TEMPLATE_LAYOUT.title, scale: 1.6, topMm: 62, line1Color: '#f8fafc', line2Color: '#cbd5e1' }, subtitle: { ...DEFAULT_TEMPLATE_LAYOUT.subtitle, preset: 'docu', maxChars: 25, scale: 0.95, gridPosition: 8, entryAnimation: 'slide_down' } },
+  'interview-talk': { ...DEFAULT_TEMPLATE_LAYOUT, videoContainer: { xPct: 5, yPct: 10, widthPct: 90, heightPct: 76, radiusPx: 20 }, title: { ...DEFAULT_TEMPLATE_LAYOUT.title, scale: 1.5, topMm: 24, line1Color: '#ffffff', line2Color: '#94a3b8' }, subtitle: { ...DEFAULT_TEMPLATE_LAYOUT.subtitle, preset: 'lecture', maxChars: 28, scale: 0.96, gridPosition: 6, entryAnimation: 'fade' } },
+  'crime-issue': { ...DEFAULT_TEMPLATE_LAYOUT, title: { ...DEFAULT_TEMPLATE_LAYOUT.title, scale: 2.0, topMm: 50, line1Color: '#ef4444', line2Color: '#f8fafc' }, subtitle: { ...DEFAULT_TEMPLATE_LAYOUT.subtitle, preset: 'shorts', maxChars: 21, scale: 1.06, gridPosition: 8, entryAnimation: 'slide_up' } },
+  'healing-emotion': { ...DEFAULT_TEMPLATE_LAYOUT, title: { ...DEFAULT_TEMPLATE_LAYOUT.title, scale: 1.55, topMm: 64, line1Color: '#e2e8f0', line2Color: '#ffffff' }, subtitle: { ...DEFAULT_TEMPLATE_LAYOUT.subtitle, preset: 'docu', maxChars: 24, scale: 0.92, gridPosition: 6, entryAnimation: 'fade' } },
+  'mystery-horror': { ...DEFAULT_TEMPLATE_LAYOUT, title: { ...DEFAULT_TEMPLATE_LAYOUT.title, scale: 2.1, topMm: 48, line1Color: '#f43f5e', line2Color: '#f8fafc' }, subtitle: { ...DEFAULT_TEMPLATE_LAYOUT.subtitle, preset: 'shorts', maxChars: 20, scale: 1.05, gridPosition: 5, entryAnimation: 'slide_left' } },
+  'kids-family': { ...DEFAULT_TEMPLATE_LAYOUT, title: { ...DEFAULT_TEMPLATE_LAYOUT.title, scale: 1.85, topMm: 58, line1Color: '#22c55e', line2Color: '#ffffff' }, subtitle: { ...DEFAULT_TEMPLATE_LAYOUT.subtitle, preset: 'lecture', maxChars: 22, scale: 1.02, gridPosition: 9, entryAnimation: 'slide_right' } },
+};
+
 const BUILTIN_SUBTITLE_TEMPLATES: BuiltinSubtitleTemplate[] = [
-  { id: 'default-basic', name: '00 기본', description: '기본 레이아웃 템플릿', sample: '핵심만 빠르게 전달', previewImage: '/subtitle_templates/00 기본.jpg', config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleGridPosition: 9, subtitleMaxChars: 24, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '핵심,중요,요약', subtitleUsePerCutKeywords: false } },
-  { id: 'promo-product', name: '상품광고', description: '강한 CTA, 빠른 강조, 전환 유도', sample: '지금 안 보면 손해! 오늘만 특가', previewImage: '/subtitle_templates/09. 상품.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleGridPosition: 9, subtitleMaxChars: 18, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_up', subtitleKeywords: '한정,특가,무료,지금,혜택', subtitleUsePerCutKeywords: false } },
-  { id: 'news-urgent', name: '뉴스 브리핑', description: '신뢰감 있는 헤드라인형', sample: '속보: 핵심 내용 30초 요약', previewImage: '/subtitle_templates/07. MBC뉴스.png', config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 26, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'fade', subtitleKeywords: '속보,현장,단독,브리핑,핵심', subtitleUsePerCutKeywords: false } },
-  { id: 'comedy-skit', name: '코믹 숏폼', description: '리액션 중심, 강한 단어 하이라이트', sample: '이 장면에서 다들 터졌습니다', previewImage: '/subtitle_templates/02. 일상쇼츠.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleGridPosition: 6, subtitleMaxChars: 20, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'pop', subtitleKeywords: '폭소,레전드,미친,반전,웃김', subtitleUsePerCutKeywords: true } },
-  { id: 'pet-animal', name: '동물/펫', description: '귀여움 강조, 짧고 또렷한 문장', sample: '심쿵 포인트 모아보기', previewImage: '/subtitle_templates/10. 동물.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 19, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'slide_right', subtitleKeywords: '귀여움,심쿵,댕댕이,냥냥이,힐링', subtitleUsePerCutKeywords: true } },
-  { id: 'senior-health', name: '시니어 정보', description: '가독성 우선, 안정적인 템포', sample: '천천히, 정확하게 핵심 전달', previewImage: '/subtitle_templates/04. 시니어.png', config: { subtitlePreset: 'lecture', subtitlePosition: 'middle', subtitleGridPosition: 6, subtitleMaxChars: 30, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '건강,주의,습관,관리,예방', subtitleUsePerCutKeywords: false } },
-  { id: 'motivation', name: '동기부여', description: '강조 단어 중심 임팩트', sample: '딱 1년만, 인생이 바뀝니다', previewImage: '/subtitle_templates/12. 동기부여.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleGridPosition: 5, subtitleMaxChars: 22, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_left', subtitleKeywords: '도전,성공,습관,목표,실행', subtitleUsePerCutKeywords: true } },
-  { id: 'knowledge-bite', name: '지식/교양', description: '정보 전달 최적화', sample: '모르면 손해보는 핵심 상식', previewImage: '/subtitle_templates/11. 지식.png', config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 27, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '핵심,원리,사실,정리,요약', subtitleUsePerCutKeywords: false } },
-  { id: 'review-tech', name: '리뷰/언박싱', description: '기능/가격/결론 강조', sample: '실사용 기준으로 딱 정리', previewImage: '/subtitle_templates/05. 강의.png', config: { subtitlePreset: 'lecture', subtitlePosition: 'bottom', subtitleGridPosition: 9, subtitleMaxChars: 24, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_up', subtitleKeywords: '장점,단점,가격,성능,결론', subtitleUsePerCutKeywords: true } },
-  { id: 'vlog-daily', name: '브이로그', description: '자연스러운 흐름, 감성 유지', sample: '소소하지만 확실한 하루 기록', previewImage: '/subtitle_templates/03 전체화면(가운데).png', config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 25, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'slide_down', subtitleKeywords: '일상,기록,루틴,감성,하루', subtitleUsePerCutKeywords: false } },
-  { id: 'interview-talk', name: '인터뷰', description: '질문-답변 구조 가독성 최적화', sample: '질문 하나로 바뀐 관점', previewImage: '/subtitle_templates/01.정보쇼츠.png', config: { subtitlePreset: 'lecture', subtitlePosition: 'middle', subtitleGridPosition: 6, subtitleMaxChars: 28, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '질문,답변,경험,핵심,인사이트', subtitleUsePerCutKeywords: false } },
-  { id: 'crime-issue', name: '사건/이슈', description: '긴장감, 핵심 단어 강한 강조', sample: '순식간에 벌어진 충격 상황', previewImage: '/subtitle_templates/13. 사건.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 21, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_up', subtitleKeywords: '충격,단독,증거,현장,진실', subtitleUsePerCutKeywords: true } },
-  { id: 'healing-emotion', name: '감성/힐링', description: '부드러운 등장, 따뜻한 톤', sample: '마음이 편해지는 30초', previewImage: '/subtitle_templates/08. 검은바탕.png', config: { subtitlePreset: 'docu', subtitlePosition: 'middle', subtitleGridPosition: 6, subtitleMaxChars: 24, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'fade', subtitleKeywords: '힐링,감성,위로,따뜻함,휴식', subtitleUsePerCutKeywords: false } },
-  { id: 'mystery-horror', name: '미스터리/공포', description: '암전 분위기, 강한 키워드', sample: '절대 혼자 보지 마세요', previewImage: '/subtitle_templates/14. 이슈.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleGridPosition: 5, subtitleMaxChars: 20, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_left', subtitleKeywords: '미스터리,공포,소름,경고,반전', subtitleUsePerCutKeywords: true } },
-  { id: 'kids-family', name: '키즈/패밀리', description: '선명하고 쉬운 문장, 밝은 템포', sample: '아이도 바로 이해하는 설명', previewImage: '/subtitle_templates/06. 이슈.png', config: { subtitlePreset: 'lecture', subtitlePosition: 'bottom', subtitleGridPosition: 9, subtitleMaxChars: 22, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'slide_right', subtitleKeywords: '재미,배움,놀이,친구,가족', subtitleUsePerCutKeywords: false } },
+  { id: 'default-basic', name: '00 기본', description: '기본 레이아웃 템플릿', sample: '핵심만 빠르게 전달', previewImage: '/subtitle_templates/00 기본.jpg', config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleGridPosition: 9, subtitleMaxChars: 24, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '핵심,중요,요약', subtitleUsePerCutKeywords: false }, layout: BUILTIN_TEMPLATE_LAYOUTS['default-basic'] },
+  { id: 'promo-product', name: '상품광고', description: '강한 CTA, 빠른 강조, 전환 유도', sample: '지금 안 보면 손해! 오늘만 특가', previewImage: '/subtitle_templates/09. 상품.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleGridPosition: 9, subtitleMaxChars: 18, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_up', subtitleKeywords: '한정,특가,무료,지금,혜택', subtitleUsePerCutKeywords: false }, layout: BUILTIN_TEMPLATE_LAYOUTS['promo-product'] },
+  { id: 'news-urgent', name: '뉴스 브리핑', description: '신뢰감 있는 헤드라인형', sample: '속보: 핵심 내용 30초 요약', previewImage: '/subtitle_templates/07. MBC뉴스.png', config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 26, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'fade', subtitleKeywords: '속보,현장,단독,브리핑,핵심', subtitleUsePerCutKeywords: false }, layout: BUILTIN_TEMPLATE_LAYOUTS['news-urgent'] },
+  { id: 'comedy-skit', name: '코믹 숏폼', description: '리액션 중심, 강한 단어 하이라이트', sample: '이 장면에서 다들 터졌습니다', previewImage: '/subtitle_templates/02. 일상쇼츠.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleGridPosition: 6, subtitleMaxChars: 20, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'pop', subtitleKeywords: '폭소,레전드,미친,반전,웃김', subtitleUsePerCutKeywords: true }, layout: BUILTIN_TEMPLATE_LAYOUTS['comedy-skit'] },
+  { id: 'pet-animal', name: '동물/펫', description: '귀여움 강조, 짧고 또렷한 문장', sample: '심쿵 포인트 모아보기', previewImage: '/subtitle_templates/10. 동물.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 19, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'slide_right', subtitleKeywords: '귀여움,심쿵,댕댕이,냥냥이,힐링', subtitleUsePerCutKeywords: true }, layout: BUILTIN_TEMPLATE_LAYOUTS['pet-animal'] },
+  { id: 'senior-health', name: '시니어 정보', description: '가독성 우선, 안정적인 템포', sample: '천천히, 정확하게 핵심 전달', previewImage: '/subtitle_templates/04. 시니어.png', config: { subtitlePreset: 'lecture', subtitlePosition: 'middle', subtitleGridPosition: 6, subtitleMaxChars: 30, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '건강,주의,습관,관리,예방', subtitleUsePerCutKeywords: false }, layout: BUILTIN_TEMPLATE_LAYOUTS['senior-health'] },
+  { id: 'motivation', name: '동기부여', description: '강조 단어 중심 임팩트', sample: '딱 1년만, 인생이 바뀝니다', previewImage: '/subtitle_templates/12. 동기부여.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleGridPosition: 5, subtitleMaxChars: 22, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_left', subtitleKeywords: '도전,성공,습관,목표,실행', subtitleUsePerCutKeywords: true }, layout: BUILTIN_TEMPLATE_LAYOUTS.motivation },
+  { id: 'knowledge-bite', name: '지식/교양', description: '정보 전달 최적화', sample: '모르면 손해보는 핵심 상식', previewImage: '/subtitle_templates/11. 지식.png', config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 27, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '핵심,원리,사실,정리,요약', subtitleUsePerCutKeywords: false }, layout: BUILTIN_TEMPLATE_LAYOUTS['knowledge-bite'] },
+  { id: 'review-tech', name: '리뷰/언박싱', description: '기능/가격/결론 강조', sample: '실사용 기준으로 딱 정리', previewImage: '/subtitle_templates/05. 강의.png', config: { subtitlePreset: 'lecture', subtitlePosition: 'bottom', subtitleGridPosition: 9, subtitleMaxChars: 24, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_up', subtitleKeywords: '장점,단점,가격,성능,결론', subtitleUsePerCutKeywords: true }, layout: BUILTIN_TEMPLATE_LAYOUTS['review-tech'] },
+  { id: 'vlog-daily', name: '브이로그', description: '자연스러운 흐름, 감성 유지', sample: '소소하지만 확실한 하루 기록', previewImage: '/subtitle_templates/03 전체화면(가운데).png', config: { subtitlePreset: 'docu', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 25, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'slide_down', subtitleKeywords: '일상,기록,루틴,감성,하루', subtitleUsePerCutKeywords: false }, layout: BUILTIN_TEMPLATE_LAYOUTS['vlog-daily'] },
+  { id: 'interview-talk', name: '인터뷰', description: '질문-답변 구조 가독성 최적화', sample: '질문 하나로 바뀐 관점', previewImage: '/subtitle_templates/01.정보쇼츠.png', config: { subtitlePreset: 'lecture', subtitlePosition: 'middle', subtitleGridPosition: 6, subtitleMaxChars: 28, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'fade', subtitleKeywords: '질문,답변,경험,핵심,인사이트', subtitleUsePerCutKeywords: false }, layout: BUILTIN_TEMPLATE_LAYOUTS['interview-talk'] },
+  { id: 'crime-issue', name: '사건/이슈', description: '긴장감, 핵심 단어 강한 강조', sample: '순식간에 벌어진 충격 상황', previewImage: '/subtitle_templates/13. 사건.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'bottom', subtitleGridPosition: 8, subtitleMaxChars: 21, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_up', subtitleKeywords: '충격,단독,증거,현장,진실', subtitleUsePerCutKeywords: true }, layout: BUILTIN_TEMPLATE_LAYOUTS['crime-issue'] },
+  { id: 'healing-emotion', name: '감성/힐링', description: '부드러운 등장, 따뜻한 톤', sample: '마음이 편해지는 30초', previewImage: '/subtitle_templates/08. 검은바탕.png', config: { subtitlePreset: 'docu', subtitlePosition: 'middle', subtitleGridPosition: 6, subtitleMaxChars: 24, subtitleWordHighlight: false, subtitleHighlightStrength: 'low', subtitleEntryAnimation: 'fade', subtitleKeywords: '힐링,감성,위로,따뜻함,휴식', subtitleUsePerCutKeywords: false }, layout: BUILTIN_TEMPLATE_LAYOUTS['healing-emotion'] },
+  { id: 'mystery-horror', name: '미스터리/공포', description: '암전 분위기, 강한 키워드', sample: '절대 혼자 보지 마세요', previewImage: '/subtitle_templates/14. 이슈.png', config: { subtitlePreset: 'shorts', subtitlePosition: 'middle', subtitleGridPosition: 5, subtitleMaxChars: 20, subtitleWordHighlight: true, subtitleHighlightStrength: 'high', subtitleEntryAnimation: 'slide_left', subtitleKeywords: '미스터리,공포,소름,경고,반전', subtitleUsePerCutKeywords: true }, layout: BUILTIN_TEMPLATE_LAYOUTS['mystery-horror'] },
+  { id: 'kids-family', name: '키즈/패밀리', description: '선명하고 쉬운 문장, 밝은 템포', sample: '아이도 바로 이해하는 설명', previewImage: '/subtitle_templates/06. 이슈.png', config: { subtitlePreset: 'lecture', subtitlePosition: 'bottom', subtitleGridPosition: 9, subtitleMaxChars: 22, subtitleWordHighlight: true, subtitleHighlightStrength: 'medium', subtitleEntryAnimation: 'slide_right', subtitleKeywords: '재미,배움,놀이,친구,가족', subtitleUsePerCutKeywords: false }, layout: BUILTIN_TEMPLATE_LAYOUTS['kids-family'] },
 ];
 
 const getBuiltinTemplatePreview = (template: BuiltinSubtitleTemplate) => {
@@ -1627,6 +1694,13 @@ const drawSlideToCanvas = (
   progress: number,
   width: number,
   height: number,
+  container?: {
+    xPct?: number;
+    yPct?: number;
+    widthPct?: number;
+    heightPct?: number;
+    radiusPx?: number;
+  },
 ) => {
   const animation = SLIDE_MOTION_ANIMATION[motion];
   const clamped = Math.min(1, Math.max(0, progress));
@@ -1642,16 +1716,31 @@ const drawSlideToCanvas = (
   const offsetX = interpolate(startX, endX, clamped) * width;
   const offsetY = interpolate(startY, endY, clamped) * height;
 
-  const coverScale = Math.max(width / image.width, height / image.height);
+  const frameX = Math.round(width * Math.max(0, Math.min(100, Number(container?.xPct ?? 0))) / 100);
+  const frameY = Math.round(height * Math.max(0, Math.min(100, Number(container?.yPct ?? 0))) / 100);
+  const frameW = Math.max(1, Math.round(width * Math.max(1, Math.min(100, Number(container?.widthPct ?? 100))) / 100));
+  const frameH = Math.max(1, Math.round(height * Math.max(1, Math.min(100, Number(container?.heightPct ?? 100))) / 100));
+  const frameRadius = Math.max(0, Number(container?.radiusPx ?? 0));
+
+  const coverScale = Math.max(frameW / image.width, frameH / image.height);
   const drawWidth = image.width * coverScale * scale;
   const drawHeight = image.height * coverScale * scale;
-  const drawX = (width - drawWidth) / 2 + offsetX;
-  const drawY = (height - drawHeight) / 2 + offsetY;
+  const drawX = frameX + (frameW - drawWidth) / 2 + offsetX;
+  const drawY = frameY + (frameH - drawHeight) / 2 + offsetY;
 
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, width, height);
+  ctx.save();
+  ctx.beginPath();
+  if (frameRadius > 0 && typeof (ctx as any).roundRect === 'function') {
+    (ctx as any).roundRect(frameX, frameY, frameW, frameH, Math.min(frameRadius, Math.min(frameW, frameH) / 2));
+  } else {
+    ctx.rect(frameX, frameY, frameW, frameH);
+  }
+  ctx.clip();
   ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+  ctx.restore();
 };
 
 const drawVideoFrameToCanvas = (
@@ -1659,11 +1748,24 @@ const drawVideoFrameToCanvas = (
   video: HTMLVideoElement,
   width: number,
   height: number,
+  container?: {
+    xPct?: number;
+    yPct?: number;
+    widthPct?: number;
+    heightPct?: number;
+    radiusPx?: number;
+  },
 ) => {
   if (!video.videoWidth || !video.videoHeight) return;
 
+  const frameX = Math.round(width * Math.max(0, Math.min(100, Number(container?.xPct ?? 0))) / 100);
+  const frameY = Math.round(height * Math.max(0, Math.min(100, Number(container?.yPct ?? 0))) / 100);
+  const frameW = Math.max(1, Math.round(width * Math.max(1, Math.min(100, Number(container?.widthPct ?? 100))) / 100));
+  const frameH = Math.max(1, Math.round(height * Math.max(1, Math.min(100, Number(container?.heightPct ?? 100))) / 100));
+  const frameRadius = Math.max(0, Number(container?.radiusPx ?? 0));
+
   const mediaRatio = video.videoWidth / video.videoHeight;
-  const canvasRatio = width / height;
+  const canvasRatio = frameW / frameH;
   let sourceWidth = video.videoWidth;
   let sourceHeight = video.videoHeight;
   let sourceX = 0;
@@ -1680,7 +1782,16 @@ const drawVideoFrameToCanvas = (
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, width, height);
-  ctx.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height);
+  ctx.save();
+  ctx.beginPath();
+  if (frameRadius > 0 && typeof (ctx as any).roundRect === 'function') {
+    (ctx as any).roundRect(frameX, frameY, frameW, frameH, Math.min(frameRadius, Math.min(frameW, frameH) / 2));
+  } else {
+    ctx.rect(frameX, frameY, frameW, frameH);
+  }
+  ctx.clip();
+  ctx.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, frameX, frameY, frameW, frameH);
+  ctx.restore();
 };
 
 const InlineLockedSection = ({
@@ -1787,7 +1898,7 @@ export default function App() {
   const [ui, setUi] = useState({
     settingsOpen: false,
     happyDayOpen: false,
-    panelsOpen: { p1: true, p2: true, p3: true, p4: true, p_style: true, p5: true, p6: true, p7: true, p8: true, p9: true, p10: true, p11: true, p12: true, p13: true, p14: true, p15: true },
+    panelsOpen: { p1: true, p2: true, p3: true, p4: true, p_style: true, p5: true, p6: true, p7: true, p8: true, p9: true, p10: true, p11: true, p12: true, p14: true, p15: true },
     searching: false,
     searchError: '',
     videoStyle: {
@@ -1836,6 +1947,7 @@ export default function App() {
       audioUrl: '',
       measuredDuration: 0,
       status: '',
+      activeProvider: 'gemini' as 'gemini' | 'elevenlabs',
       voice: 'Kore',
       model: 'gemini-2.5-flash-preview-tts',
       elevenlabsVoice: 'elv_adam',
@@ -1878,6 +1990,7 @@ export default function App() {
       templateTitleEnabled: true,
       templateTitleText: '',
       templateTitleFontFamily: '아네모네',
+      templateTitleMaxLines: 2,
       templateTitleLine1TopMm: 60,
       templateTitleLine2BottomMm: 96,
       templateTitleLine1Color: '#ef4444',
@@ -1887,6 +2000,11 @@ export default function App() {
       templateTitleStrokeColor: 'rgba(0,0,0,0.92)',
       templateTitleScale: 2,
       templateTitleGenerating: false,
+      videoContainerXPercent: 0,
+      videoContainerYPercent: 0,
+      videoContainerWidthPercent: 100,
+      videoContainerHeightPercent: 100,
+      videoContainerRadiusPx: 0,
       textOverlays: [] as Array<{
         id: string;
         text: string;
@@ -2126,6 +2244,11 @@ export default function App() {
   const currentAutoTitle = ui.autoFlow.running ? ui.autoFlow.lastTitle : ui.productPromo.running ? '상품홍보 원클릭' : '';
   const isGeminiTtsGenerating = ui.tts.generating && String(ui.tts.status || '').includes('Gemini');
   const isElevenTtsGenerating = ui.tts.generating && String(ui.tts.status || '').includes('ElevenLabs');
+  const selectedTtsProvider: 'gemini' | 'elevenlabs' = Boolean(ui.autoFlow.fixedEnabled)
+    ? (ui.autoFlow.fixed.ttsProvider === 'elevenlabs' ? 'elevenlabs' : 'gemini')
+    : ((ui.tts.activeProvider === 'elevenlabs') ? 'elevenlabs' : 'gemini');
+  const geminiSelected = selectedTtsProvider === 'gemini';
+  const elevenSelected = selectedTtsProvider === 'elevenlabs';
   const productPromoPlan = useMemo(() => resolveProductPromoPlan(ui.productPromo), [ui.productPromo]);
 
   useEffect(() => {
@@ -3581,7 +3704,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
     if (!keys.g1 || !ui.script.output) return alert('대본을 먼저 생성하세요.');
     if (!tryStartTtsProvider('gemini')) return;
     taskAbortRef.current.tts = false;
-    setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: true, status: 'Gemini 생성 중...' } }));
+    setUi(prev => ({ ...prev, tts: { ...prev.tts, activeProvider: 'gemini', generating: true, status: 'Gemini 생성 중...' } }));
 
     try {
       const ai = new GoogleGenAI({ apiKey: keys.g1 });
@@ -3638,7 +3761,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
     if (!keys.e11 || !ui.script.output) return alert('대본을 먼저 생성하세요.');
     if (!tryStartTtsProvider('elevenlabs')) return;
     taskAbortRef.current.tts = false;
-    setUi(prev => ({ ...prev, tts: { ...prev.tts, generating: true, status: 'ElevenLabs 생성 중...' } }));
+    setUi(prev => ({ ...prev, tts: { ...prev.tts, activeProvider: 'elevenlabs', generating: true, status: 'ElevenLabs 생성 중...' } }));
 
     try {
       const cleanScript = buildCleanTtsScript(ui.script.output, (ui.script.lang as any) || 'KR');
@@ -4361,14 +4484,13 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
         panelsOpen: {
           ...prev.panelsOpen,
           p12: true,
-          p13: true,
           p14: true,
         },
       }));
 
       setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, running: false, step: '12단계 완료', error: '' } }));
       appendAutoLog('자동 진행 12단계 완료 (최종 렌더/발행은 수동 확인)');
-      showNotice('자동 진행 12단계 완료: 13번 편집 후 14번 발행하세요.', 'success');
+      showNotice('자동 진행 12단계 완료: 12번 편집 후 14번 발행하세요.', 'success');
       setAutoDoneModalText(AUTO_DONE_MESSAGE);
       await persistAutoSnapshot(8, 'done');
       await clearAutoSnapshot();
@@ -4843,7 +4965,7 @@ JSON만 반환:
         },
         panelsOpen: {
           ...prev.panelsOpen,
-          p13: true,
+          p12: true,
           p14: true,
         },
       }));
@@ -6358,6 +6480,13 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
           )
         : [];
       let activeVideoCut = -1;
+      const renderContainer = {
+        xPct: Number(ui.finalVideo.videoContainerXPercent || 0),
+        yPct: Number(ui.finalVideo.videoContainerYPercent || 0),
+        widthPct: Number(ui.finalVideo.videoContainerWidthPercent || 100),
+        heightPct: Number(ui.finalVideo.videoContainerHeightPercent || 100),
+        radiusPx: Number(ui.finalVideo.videoContainerRadiusPx || 0),
+      };
       const pauseVideo = (cut: number) => {
         if (cut < 0) return;
         const video = videoByCut.get(cut);
@@ -6387,7 +6516,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
             void video.play().catch(() => undefined);
           }
           if (video.readyState >= 2) {
-            drawVideoFrameToCanvas(ctx, video, width, height);
+            drawVideoFrameToCanvas(ctx, video, width, height, renderContainer);
             return;
           }
         } else if (activeVideoCut !== -1) {
@@ -6396,7 +6525,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
         }
 
         if (image) {
-          drawSlideToCanvas(ctx, image, slide.motion, slideProgress, width, height);
+          drawSlideToCanvas(ctx, image, slide.motion, slideProgress, width, height, renderContainer);
           return;
         }
 
@@ -6406,7 +6535,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
       };
 
       if (introImage) {
-        drawSlideToCanvas(ctx, introImage, 'zoom_in', 0, width, height);
+        drawSlideToCanvas(ctx, introImage, 'zoom_in', 0, width, height, renderContainer);
       } else {
         drawFrameForSlide(0, 0);
       }
@@ -6467,7 +6596,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
           }
 
           if (introImage && elapsed < introDuration) {
-            drawSlideToCanvas(ctx, introImage, 'zoom_in', Math.min(1, elapsed / Math.max(0.01, introDuration)), width, height);
+            drawSlideToCanvas(ctx, introImage, 'zoom_in', Math.min(1, elapsed / Math.max(0.01, introDuration)), width, height, renderContainer);
             requestAnimationFrame(render);
             return;
           }
@@ -6505,6 +6634,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
                 highlightWord: ui.finalVideo.templateTitleHighlightWord,
                 scale: ui.finalVideo.templateTitleScale,
                 subtitlePreset: ui.finalVideo.subtitlePreset,
+                maxLines: ui.finalVideo.templateTitleMaxLines,
               },
             );
           }
@@ -6699,6 +6829,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
   const applyBuiltinSubtitleTemplate = (templateId: string) => {
     const selected = BUILTIN_SUBTITLE_TEMPLATES.find(t => t.id === templateId);
     if (!selected) return;
+    const layout = selected.layout || DEFAULT_TEMPLATE_LAYOUT;
     const defaultTitleText = ui.selectedHookTitle ? normalizeHookTitleForOverlay(ui.selectedHookTitle) : '';
     const defaultHighlightWord = normalizeSubtitleText(defaultTitleText.split(/\r?\n/)[0] || '').split(/\s+/).find(Boolean) || '';
 
@@ -6706,26 +6837,33 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
       ...prev,
       finalVideo: {
         ...prev.finalVideo,
-        subtitlePreset: selected.config.subtitlePreset,
+        subtitlePreset: layout.subtitle.preset || selected.config.subtitlePreset,
         subtitlePosition: selected.config.subtitlePosition,
-        subtitleGridPosition: Number(selected.config.subtitleGridPosition || 7),
-        subtitleMaxChars: selected.config.subtitleMaxChars,
+        subtitleGridPosition: Number(layout.subtitle.gridPosition || selected.config.subtitleGridPosition || 7),
+        subtitleMaxChars: Number(layout.subtitle.maxChars || selected.config.subtitleMaxChars),
+        subtitleScale: Number(layout.subtitle.scale || prev.finalVideo.subtitleScale || 1),
         subtitleWordHighlight: selected.config.subtitleWordHighlight,
         subtitleHighlightStrength: selected.config.subtitleHighlightStrength,
-        subtitleEntryAnimation: selected.config.subtitleEntryAnimation,
+        subtitleEntryAnimation: layout.subtitle.entryAnimation || selected.config.subtitleEntryAnimation,
         subtitleKeywords: selected.config.subtitleKeywords,
         subtitleUsePerCutKeywords: selected.config.subtitleUsePerCutKeywords,
+        templateTitleMaxLines: Math.max(1, Math.min(4, Number(layout.title.maxLines || 2))),
         templateTitleEnabled: true,
         templateTitleText: defaultTitleText,
         templateTitleFontFamily: '아네모네',
-        templateTitleLine1TopMm: 60,
-        templateTitleLine2BottomMm: 96,
-        templateTitleLine1Color: '#ef4444',
-        templateTitleLine2Color: '#111111',
-        templateTitleHighlightColor: '#fde047',
+        templateTitleLine1TopMm: Number(layout.title.topMm || 60),
+        templateTitleLine2BottomMm: Number(layout.title.line2BottomMm || 96),
+        templateTitleLine1Color: layout.title.line1Color || '#ef4444',
+        templateTitleLine2Color: layout.title.line2Color || '#111111',
+        templateTitleHighlightColor: layout.title.highlightColor || '#fde047',
         templateTitleHighlightWord: defaultHighlightWord,
-        templateTitleStrokeColor: 'rgba(0,0,0,0.92)',
-        templateTitleScale: 2,
+        templateTitleStrokeColor: layout.title.strokeColor || 'rgba(0,0,0,0.92)',
+        templateTitleScale: Number(layout.title.scale || 2),
+        videoContainerXPercent: Number(layout.videoContainer.xPct || 0),
+        videoContainerYPercent: Number(layout.videoContainer.yPct || 0),
+        videoContainerWidthPercent: Number(layout.videoContainer.widthPct || 100),
+        videoContainerHeightPercent: Number(layout.videoContainer.heightPct || 100),
+        videoContainerRadiusPx: Number(layout.videoContainer.radiusPx || 0),
         subtitleTemplateLockEnabled: true,
         subtitleTemplateLockedId: templateId,
       },
@@ -7605,12 +7743,12 @@ ${JSON.stringify(cutPayload)}`,
             <div className="flex flex-wrap gap-2 pt-1">
               <button
                 onClick={() => {
-                  setUi(prev => ({ ...prev, panelsOpen: { ...prev.panelsOpen, p13: true }, publishing: { ...prev.publishing, mobileStep: 3 } }));
-                  document.getElementById('panel-p13')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  setUi(prev => ({ ...prev, panelsOpen: { ...prev.panelsOpen, p12: true }, publishing: { ...prev.publishing, mobileStep: 3 } }));
+                  document.getElementById('panel-p12')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }}
                 className="px-3 py-1.5 rounded-lg text-[10px] font-black bg-white/10 text-white border border-white/15 hover:bg-white/20"
               >
-                13번 바로가기
+                12번 편집 바로가기
               </button>
               <button
                 onClick={() => {
@@ -8637,13 +8775,32 @@ ${JSON.stringify(cutPayload)}`,
           <PanelHeader title="8. tts 생성" id="p7" colorClass="text-cyan-400" />
           {ui.panelsOpen.p7 && (
             <div className="space-y-6">
+              <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">TTS 엔진 선택</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => !isOneClickFixed && setUi(prev => ({ ...prev, tts: { ...prev.tts, activeProvider: 'gemini' } }))}
+                    disabled={isOneClickFixed}
+                    className={`py-2 rounded-lg text-xs font-black border transition-all ${geminiSelected ? 'running-gradient text-black border-cyan-300' : 'bg-slate-700/80 text-slate-300 border-slate-600'} disabled:opacity-60 disabled:cursor-not-allowed`}
+                  >
+                    Gemini
+                  </button>
+                  <button
+                    onClick={() => !isOneClickFixed && setUi(prev => ({ ...prev, tts: { ...prev.tts, activeProvider: 'elevenlabs' } }))}
+                    disabled={isOneClickFixed}
+                    className={`py-2 rounded-lg text-xs font-black border transition-all ${elevenSelected ? 'running-gradient text-black border-indigo-300' : 'bg-slate-700/80 text-slate-300 border-slate-600'} disabled:opacity-60 disabled:cursor-not-allowed`}
+                  >
+                    ElevenLabs
+                  </button>
+                </div>
+              </div>
               <InlineLockedSection
                 locked={!hasGeminiKey}
                 title="Gemini API 키 필요"
                 description="Gemini TTS 생성은 Gemini API 키가 필요합니다. API 설정에서 Gemini 키를 입력해 주세요."
                 onOpenSettings={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
               >
-                <div className="space-y-6 bg-black/30 border border-white/10 rounded-2xl p-5">
+                <div className={`space-y-6 border rounded-2xl p-5 transition-all ${geminiSelected ? 'bg-black/30 border-cyan-300/30' : 'bg-slate-900/50 border-slate-700 opacity-60'}`}>
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-[11px] font-black text-cyan-300 uppercase tracking-widest">Gemini TTS</p>
@@ -8657,7 +8814,7 @@ ${JSON.stringify(cutPayload)}`,
                         <select 
                           value={ui.tts.model}
                           onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, model: e.target.value } }))}
-                          disabled={isOneClickFixed}
+                          disabled={isOneClickFixed || !geminiSelected}
                           className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                         {GEMINI_TTS_ONLY_MODELS.map(m => (
@@ -8670,6 +8827,7 @@ ${JSON.stringify(cutPayload)}`,
                         <label className="block text-xs font-black text-slate-400 uppercase tracking-widest">TTS 목소리 선택</label>
                         <button 
                           onClick={() => handlePreviewVoice(ui.tts.voice)}
+                          disabled={!geminiSelected}
                           className={`text-[10px] font-black px-3 py-1.5 rounded-full transition-all border flex items-center gap-1.5 ${previewingId === ui.tts.voice ? 'bg-cyan-500 text-black border-cyan-500 shadow-[0_0_15px_rgba(6,182,212,0.5)]' : 'bg-white/5 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/10'}`}
                         >
                           {previewLoading && previewingId === ui.tts.voice ? (
@@ -8685,7 +8843,7 @@ ${JSON.stringify(cutPayload)}`,
                       <select 
                         value={ui.tts.voice}
                         onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, voice: e.target.value } }))}
-                        disabled={isOneClickFixed}
+                        disabled={isOneClickFixed || !geminiSelected}
                         className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-cyan-500/50 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {GEMINI_TTS_VOICES.map(v => (
@@ -8706,7 +8864,7 @@ ${JSON.stringify(cutPayload)}`,
                         <select 
                           value={ui.tts.selectedToneId}
                           onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, selectedToneId: e.target.value } }))}
-                          disabled={isOneClickFixed}
+                          disabled={isOneClickFixed || !geminiSelected}
                           className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none focus:ring-2 ring-cyan-500/50 cursor-pointer appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {TONE_STYLES.map(s => (
@@ -8725,8 +8883,8 @@ ${JSON.stringify(cutPayload)}`,
                     <div className="flex flex-col justify-end gap-3">
                       <button 
                         onClick={handleGenerateGeminiTTS}
-                        disabled={!ui.script.output || (ui.tts.generating && !isGeminiTtsGenerating)}
-                        className={`w-full text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${isGeminiTtsGenerating ? 'running-gradient' : 'bg-cyan-500 hover:bg-cyan-600'}`}
+                        disabled={!geminiSelected || !ui.script.output || (ui.tts.generating && !isGeminiTtsGenerating)}
+                        className={`w-full text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${isGeminiTtsGenerating || geminiSelected ? 'running-gradient' : 'bg-slate-700 text-slate-300'}`}
                       >
                         {isGeminiTtsGenerating ? <><Loader2 className="w-5 h-5 animate-spin" /> 중지</> : <><Volume2 className="w-5 h-5" /> Gemini TTS 생성</>}
                       </button>
@@ -8741,7 +8899,7 @@ ${JSON.stringify(cutPayload)}`,
                 description="ElevenLabs TTS 생성은 ElevenLabs API 키가 필요합니다. API 설정에서 키를 입력해 주세요."
                 onOpenSettings={() => setUi(prev => ({ ...prev, settingsOpen: true }))}
               >
-                <div className="space-y-6 bg-black/30 border border-white/10 rounded-2xl p-5">
+                <div className={`space-y-6 border rounded-2xl p-5 transition-all ${elevenSelected ? 'bg-black/30 border-indigo-300/30' : 'bg-slate-900/50 border-slate-700 opacity-60'}`}>
                   <div>
                     <p className="text-[11px] font-black text-indigo-300 uppercase tracking-widest">ElevenLabs TTS</p>
                     <p className="text-xs text-slate-400">로컬 미리듣기 + ElevenLabs API 생성</p>
@@ -8753,7 +8911,7 @@ ${JSON.stringify(cutPayload)}`,
                         <select
                           value={ui.tts.elevenlabsModel}
                           onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, elevenlabsModel: e.target.value } }))}
-                          disabled={isOneClickFixed}
+                          disabled={isOneClickFixed || !elevenSelected}
                           className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-indigo-500/50 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {ELEVENLABS_MODELS.map(model => (
@@ -8766,6 +8924,7 @@ ${JSON.stringify(cutPayload)}`,
                         <label className="block text-xs font-black text-slate-400 uppercase tracking-widest">TTS 목소리 선택</label>
                         <button 
                           onClick={() => handlePreviewVoice(ui.tts.elevenlabsVoice)}
+                          disabled={!elevenSelected}
                           className={`text-[10px] font-black px-3 py-1.5 rounded-full transition-all border flex items-center gap-1.5 ${previewingId === ui.tts.elevenlabsVoice ? 'bg-indigo-500 text-black border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)]' : 'bg-white/5 text-indigo-300 border-indigo-500/30 hover:bg-indigo-500/10'}`}
                         >
                           {previewLoading && previewingId === ui.tts.elevenlabsVoice ? (
@@ -8781,7 +8940,7 @@ ${JSON.stringify(cutPayload)}`,
                       <select
                         value={ui.tts.elevenlabsVoice}
                         onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, elevenlabsVoice: e.target.value } }))}
-                        disabled={isOneClickFixed}
+                        disabled={isOneClickFixed || !elevenSelected}
                         className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-2 ring-indigo-500/50 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {ELEVENLABS_VOICES.map(voice => (
@@ -8792,8 +8951,8 @@ ${JSON.stringify(cutPayload)}`,
                     <div className="flex flex-col justify-end gap-3">
                       <button
                         onClick={handleGenerateElevenLabsTTS}
-                        disabled={!ui.script.output || (ui.tts.generating && !isElevenTtsGenerating)}
-                        className={`w-full text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${isElevenTtsGenerating ? 'running-gradient' : 'bg-indigo-500 hover:bg-indigo-600'}`}
+                        disabled={!elevenSelected || !ui.script.output || (ui.tts.generating && !isElevenTtsGenerating)}
+                        className={`w-full text-black font-black py-4 rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${isElevenTtsGenerating || elevenSelected ? 'running-gradient' : 'bg-slate-700 text-slate-300'}`}
                       >
                         {isElevenTtsGenerating ? <><Loader2 className="w-5 h-5 animate-spin" /> 중지</> : <><Volume2 className="w-5 h-5" /> ElevenLabs TTS 생성</>}
                       </button>
@@ -9233,359 +9392,6 @@ ${JSON.stringify(cutPayload)}`,
           syncReport={syncReport}
           isOneClickFixed={isOneClickFixed}
         />
-
-        {/* 13. 영상편집 */}
-        <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl">
-          <PanelHeader title="13. 영상편집" id="p13" colorClass="text-rose-400" />
-          {ui.panelsOpen.p13 && (
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-rose-300/30 bg-rose-500/10 p-4 space-y-2">
-                <p className="text-[11px] font-black text-rose-100 uppercase tracking-widest">13번 = 렌더 결과 후편집 툴바</p>
-                <p className="text-xs text-rose-100/90">12번은 렌더 전 검수, 13번은 렌더 자산 후편집에 집중합니다. 미리보기 중복 마운트 없이 자막/폰트/텍스트/속도/내보내기만 경량 제어합니다.</p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-black/25 p-4 space-y-3">
-                <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">렌더 액션</p>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  <button
-                    onClick={() => document.getElementById('panel-p12')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                    className="px-3 py-2 rounded-lg bg-rose-400 text-black text-xs font-black"
-                  >
-                    12번 상세 열기
-                  </button>
-                  <button
-                    onClick={handleGenerateFinalVideo}
-                    disabled={ui.finalVideo.generating || ui.imageJobs.filter((j: any) => j.imageUrl).length === 0}
-                    className="px-3 py-2 rounded-lg bg-emerald-400 text-black text-xs font-black disabled:opacity-40"
-                  >
-                    슬라이드 재구성
-                  </button>
-                  <button
-                    onClick={handleExportSlideVideo}
-                    disabled={ui.finalVideo.slides.length === 0}
-                    className="px-3 py-2 rounded-lg bg-blue-500 text-white text-xs font-black disabled:opacity-40"
-                  >
-                    {ui.finalVideo.generating ? '렌더 중지' : '렌더 실행'}
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (!ui.finalVideo.url) {
-                        alert('먼저 렌더 결과를 생성하세요.');
-                        return;
-                      }
-                      if (!isApprovedUser) {
-                        alert('승인된 사용자만 다운로드할 수 있습니다.');
-                        return;
-                      }
-                      const a = document.createElement('a');
-                      a.href = ui.finalVideo.url;
-                      a.download = ui.finalVideo.outputFormat === 'mp4' ? 'final_slide_video.mp4' : 'final_slide_video.webm';
-                      a.click();
-                    }}
-                    disabled={!ui.finalVideo.url}
-                    className="px-3 py-2 rounded-lg bg-cyan-500 text-black text-xs font-black disabled:opacity-40"
-                  >
-                    결과 다운로드
-                  </button>
-                  <button
-                    onClick={handleConvertToMp4}
-                    disabled={!ui.finalVideo.url || ui.finalVideo.generating}
-                    className="px-3 py-2 rounded-lg bg-indigo-500 text-white text-xs font-black disabled:opacity-40"
-                  >
-                    {ui.finalVideo.transcoding ? 'MP4 변환 중지' : 'MP4 변환'}
-                  </button>
-                  <button
-                    onClick={handleDownloadSrt}
-                    disabled={ui.finalVideo.slides.length === 0 || !isApprovedUser}
-                    className="px-3 py-2 rounded-lg bg-white/10 border border-white/15 text-xs font-black text-slate-100 disabled:opacity-40"
-                  >
-                    SRT 다운로드
-                  </button>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-black/25 p-4 space-y-3">
-                <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">자막/폰트/속도</p>
-                <div className="rounded-xl border border-white/10 bg-black/30 p-3 space-y-2">
-                  <p className="text-[10px] text-slate-400">템플릿 빠른 적용</p>
-                  <div className="flex flex-wrap gap-1">
-                    {BUILTIN_SUBTITLE_TEMPLATES.slice(0, 8).map((template: any) => (
-                      <button
-                        key={template.id}
-                        onClick={() => applyBuiltinSubtitleTemplate(template.id)}
-                        className={`px-2 py-1 rounded-md text-[10px] font-black border ${ui.finalVideo.subtitleTemplateLockedId === template.id ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-white/5 text-slate-300 border-white/10'}`}
-                      >
-                        {template.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="rounded-xl border border-white/10 bg-black/30 p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] text-slate-200">자막 표시</span>
-                      <button
-                        onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitleEnabled: !prev.finalVideo.subtitleEnabled } }))}
-                        className={`px-3 py-1 rounded-md text-[10px] font-black ${ui.finalVideo.subtitleEnabled ? 'bg-emerald-400 text-black' : 'bg-white/10 text-slate-200'}`}
-                      >
-                        {ui.finalVideo.subtitleEnabled ? 'ON' : 'OFF'}
-                      </button>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-slate-400">자막 스타일</label>
-                      <div className="grid grid-cols-3 gap-1">
-                        {(['shorts', 'docu', 'lecture', 'impact', 'neon'] as SubtitlePreset[]).map((presetId) => (
-                          <button
-                            key={presetId}
-                            onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, subtitlePreset: presetId } }))}
-                            className={`px-2 py-1 rounded-md text-[10px] font-black border ${ui.finalVideo.subtitlePreset === presetId ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-white/5 text-slate-300 border-white/10'}`}
-                          >
-                            {SUBTITLE_PRESETS[presetId].label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-slate-400">자막 위치 {ui.finalVideo.subtitleGridPosition}</label>
-                      <input
-                        type="range"
-                        min={1}
-                        max={10}
-                        step={1}
-                        value={Number(ui.finalVideo.subtitleGridPosition || 7)}
-                        onChange={(e) => {
-                          const nextPos = Math.max(1, Math.min(10, Number(e.target.value || 7)));
-                          setUi((prev: any) => ({
-                            ...prev,
-                            finalVideo: {
-                              ...prev.finalVideo,
-                              subtitleGridPosition: nextPos,
-                              subtitlePosition: nextPos <= 5 ? 'middle' : 'bottom',
-                            },
-                          }));
-                        }}
-                        className="w-full"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-white/10 bg-black/30 p-3 space-y-2">
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <label className="text-[10px] text-slate-400">템플릿 제목</label>
-                        <button
-                          onClick={() => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleEnabled: !prev.finalVideo.templateTitleEnabled } }))}
-                          className={`px-2 py-1 rounded-md text-[10px] font-black ${ui.finalVideo.templateTitleEnabled ? 'bg-emerald-400 text-black' : 'bg-white/10 text-slate-200'}`}
-                        >
-                          {ui.finalVideo.templateTitleEnabled ? 'ON' : 'OFF'}
-                        </button>
-                      </div>
-                      <input
-                        value={String(ui.finalVideo.templateTitleText || '')}
-                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleText: e.target.value } }))}
-                        placeholder="제목 문구 입력"
-                        className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px]"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-slate-400">타이틀 폰트</label>
-                      <select
-                        value={String(ui.finalVideo.templateTitleFontFamily || '아네모네')}
-                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleFontFamily: e.target.value } }))}
-                        className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px]"
-                      >
-                        <option value="아네모네">아네모네</option>
-                        <option value="Pretendard">Pretendard</option>
-                        <option value="Noto Sans KR">Noto Sans KR</option>
-                        <option value="Do Hyeon">Do Hyeon</option>
-                        <option value="Jua">Jua</option>
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-slate-400">내보내기 재생속도 {Number(ui.finalVideo.exportSpeed || 1).toFixed(2)}x</label>
-                      <input
-                        type="range"
-                        min={0.75}
-                        max={1.5}
-                        step={0.05}
-                        value={Number(ui.finalVideo.exportSpeed || 1)}
-                        onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, exportSpeed: Number(e.target.value || 1) } }))}
-                        className="w-full"
-                      />
-                    </div>
-                    {ui.finalVideo.ffmpegNote && (
-                      <p className="text-[10px] text-indigo-200 bg-indigo-500/10 border border-indigo-400/20 rounded-lg px-2 py-1">
-                        {ui.finalVideo.ffmpegNote}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-black/25 p-4 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">추가 텍스트 오버레이</p>
-                  <button
-                    onClick={() => {
-                      const text = window.prompt('추가 텍스트를 입력하세요.')?.trim();
-                      if (!text) return;
-                      setUi((prev: any) => ({
-                        ...prev,
-                        finalVideo: {
-                          ...prev.finalVideo,
-                          textOverlays: [
-                            ...(prev.finalVideo.textOverlays || []),
-                            {
-                              id: `p13-${Date.now()}`,
-                              text,
-                              color: '#ffffff',
-                              bgColor: '#0f172a',
-                              scale: 1,
-                              gridPosition: 7,
-                              align: 'center',
-                            },
-                          ],
-                        },
-                      }));
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-400 text-black text-[10px] font-black"
-                  >
-                    텍스트 추가
-                  </button>
-                </div>
-                {(ui.finalVideo.textOverlays || []).length === 0 && (
-                  <p className="text-[10px] text-slate-500">추가된 텍스트가 없습니다.</p>
-                )}
-                <div className="space-y-2">
-                  {(ui.finalVideo.textOverlays || []).map((item: any) => (
-                    <div key={item.id} className="rounded-xl border border-white/10 bg-black/30 p-3 space-y-2">
-                      <div className="flex gap-2">
-                        <input
-                          value={String(item.text || '')}
-                          onChange={(e) => setUi((prev: any) => ({
-                            ...prev,
-                            finalVideo: {
-                              ...prev.finalVideo,
-                              textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, text: e.target.value } : t),
-                            },
-                          }))}
-                          className="flex-1 bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px]"
-                          placeholder="텍스트"
-                        />
-                        <button
-                          onClick={() => setUi((prev: any) => ({
-                            ...prev,
-                            finalVideo: {
-                              ...prev.finalVideo,
-                              textOverlays: (prev.finalVideo.textOverlays || []).filter((t: any) => t.id !== item.id),
-                            },
-                          }))}
-                          className="px-2 py-2 rounded-lg bg-rose-500 text-white"
-                          title="삭제"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
-                        <label className="flex items-center gap-2 bg-black/30 border border-white/10 rounded-lg px-2 py-1">
-                          글자
-                          <input
-                            type="color"
-                            value={String(item.color || '#ffffff')}
-                            onChange={(e) => setUi((prev: any) => ({
-                              ...prev,
-                              finalVideo: {
-                                ...prev.finalVideo,
-                                textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, color: e.target.value } : t),
-                              },
-                            }))}
-                            className="w-6 h-5 bg-transparent border-0"
-                          />
-                        </label>
-                        <label className="flex items-center gap-2 bg-black/30 border border-white/10 rounded-lg px-2 py-1">
-                          배경
-                          <input
-                            type="color"
-                            value={String(item.bgColor || '#0f172a')}
-                            onChange={(e) => setUi((prev: any) => ({
-                              ...prev,
-                              finalVideo: {
-                                ...prev.finalVideo,
-                                textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, bgColor: e.target.value } : t),
-                              },
-                            }))}
-                            className="w-6 h-5 bg-transparent border-0"
-                          />
-                        </label>
-                        <label className="flex items-center gap-2 bg-black/30 border border-white/10 rounded-lg px-2 py-1">
-                          크기
-                          <input
-                            type="number"
-                            min="0.7"
-                            max="2.2"
-                            step="0.1"
-                            value={Number(item.scale || 1)}
-                            onChange={(e) => setUi((prev: any) => ({
-                              ...prev,
-                              finalVideo: {
-                                ...prev.finalVideo,
-                                textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, scale: Number(e.target.value || 1) } : t),
-                              },
-                            }))}
-                            className="w-full bg-transparent outline-none"
-                          />
-                        </label>
-                        <label className="flex items-center gap-2 bg-black/30 border border-white/10 rounded-lg px-2 py-1">
-                          위치
-                          <input
-                            type="number"
-                            min="1"
-                            max="10"
-                            step="1"
-                            value={Number(item.gridPosition || 7)}
-                            onChange={(e) => setUi((prev: any) => ({
-                              ...prev,
-                              finalVideo: {
-                                ...prev.finalVideo,
-                                textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, gridPosition: Number(e.target.value || 7) } : t),
-                              },
-                            }))}
-                            className="w-full bg-transparent outline-none"
-                          />
-                        </label>
-                        <label className="flex items-center gap-2 bg-black/30 border border-white/10 rounded-lg px-2 py-1 md:col-span-2">
-                          정렬
-                          <select
-                            value={String(item.align || 'center')}
-                            onChange={(e) => setUi((prev: any) => ({
-                              ...prev,
-                              finalVideo: {
-                                ...prev.finalVideo,
-                                textOverlays: (prev.finalVideo.textOverlays || []).map((t: any) => t.id === item.id ? { ...t, align: e.target.value } : t),
-                              },
-                            }))}
-                            className="flex-1 bg-transparent outline-none"
-                          >
-                            <option value="left">left</option>
-                            <option value="center">center</option>
-                            <option value="right">right</option>
-                          </select>
-                        </label>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
-                <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">이미지 자산: <span className="font-black text-white">{ui.imageJobs.filter((j: any) => j.imageUrl).length}</span></div>
-                <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">영상 자산: <span className="font-black text-white">{ui.videoJobs.filter((j: any) => j.videoUrl).length}</span></div>
-                <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">컷 수: <span className="font-black text-white">{ui.cuts.items.length}</span></div>
-                <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">TTS 길이: <span className="font-black text-white">{ui.tts.measuredDuration > 0 ? `${ui.tts.measuredDuration.toFixed(1)}초` : '미측정'}</span></div>
-              </div>
-            </div>
-          )}
-        </section>
 
         <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-4 md:p-8 backdrop-blur-xl">
           <PanelHeader title="14. 자동 발행 (YouTube 우선)" id="p14" colorClass="text-red-400" />

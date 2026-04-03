@@ -238,12 +238,98 @@ export default function Panel12Section(props: Props) {
     return () => observer.disconnect();
   }, []);
 
-  const previewTitleFontPx = React.useMemo(() => {
+  const previewTitleLayout = React.useMemo(() => {
+    const width = Math.max(180, Number(previewFrameWidth || 360));
+    const height = width * (16 / 9);
+    const raw = String(ui.finalVideo.templateTitleText || '');
+    const rawLines = raw
+      .split(/\r?\n/)
+      .map(v => normalizeSubtitleText(v))
+      .filter(Boolean);
+    const fallback = normalizeSubtitleText(raw);
+    const titleMaxLines = Math.max(1, Math.min(4, Number(ui.finalVideo.templateTitleMaxLines || 2)));
+    const lines = rawLines.length > 0 ? rawLines.slice(0, titleMaxLines) : (fallback ? [fallback] : []);
+    const topMm = Math.max(0, Number(ui.finalVideo.templateTitleLine1TopMm || 20));
+    const topPx = mmToPxScaled(topMm, width);
+    const topPercent = Math.max(1, Math.min(95, (topPx / Math.max(1, height)) * 100));
+
+    if (lines.length === 0) {
+      return { lines: [] as string[], fontPx: 10, lineHeightPx: 12, topPercent };
+    }
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return { lines: lines.slice(0, 2), fontPx: 10, lineHeightPx: 12, topPercent };
+    }
+
+    const maxTextWidth = Math.round(width * 0.84);
+    const wrapLineByWidth = (input: string) => {
+      const chars = Array.from(String(input || ''));
+      const wrapped: string[] = [];
+      let current = '';
+      for (const ch of chars) {
+        const candidate = `${current}${ch}`;
+        if (!candidate.trim()) {
+          current = candidate;
+          continue;
+        }
+        const w = ctx.measureText(candidate).width;
+        if (w <= maxTextWidth || !current) {
+          current = candidate;
+        } else {
+          wrapped.push(current.trim());
+          current = ch;
+        }
+      }
+      if (current.trim()) wrapped.push(current.trim());
+      return wrapped;
+    };
+
+    const fontFamily = (String(ui.finalVideo.templateTitleFontFamily || 'Anemone').trim() || 'Anemone');
     const preset = SUBTITLE_PRESETS[ui.finalVideo.subtitlePreset] as any;
-    const baseScale = Number(preset?.fontScale || 0.048);
-    const titleScale = Math.max(TEXT_SCALE_MIN, Math.min(TEXT_SCALE_MAX, Number(ui.finalVideo.templateTitleScale || 1)));
-    return Math.max(10, Math.round(previewFrameWidth * baseScale * titleScale));
-  }, [previewFrameWidth, ui.finalVideo.templateTitleScale, ui.finalVideo.subtitlePreset, SUBTITLE_PRESETS]);
+    const basePx = Math.min(width, height) * Number(preset?.fontScale || 0.048);
+    let fontPx = Math.max(16, basePx * Math.max(TEXT_SCALE_MIN, Math.min(TEXT_SCALE_MAX, Number(ui.finalVideo.templateTitleScale || 1))));
+    const bottomLimitPx = mmToPxScaled(Number(ui.finalVideo.templateTitleLine2BottomMm || 35), width);
+
+    const measure = () => {
+      ctx.font = `900 ${fontPx}px "${fontFamily}", "Pretendard", "Noto Sans KR", sans-serif`;
+      const sample = ctx.measureText('가Ag');
+      const ascent = sample.actualBoundingBoxAscent || fontPx * 0.8;
+      const descent = sample.actualBoundingBoxDescent || fontPx * 0.2;
+      const lineHeight = Math.max(fontPx * 1.1, ascent + descent + fontPx * 0.06);
+      return { ascent, descent, lineHeight };
+    };
+
+    let metrics = measure();
+    ctx.font = `900 ${fontPx}px "${fontFamily}", "Pretendard", "Noto Sans KR", sans-serif`;
+    let clampedLines = lines.flatMap(line => wrapLineByWidth(line)).slice(0, titleMaxLines);
+    let secondBottom = topPx + metrics.ascent + (Math.max(1, clampedLines.length) - 1) * metrics.lineHeight + metrics.descent;
+    while (secondBottom > bottomLimitPx && fontPx > 10) {
+      fontPx -= 0.6;
+      metrics = measure();
+      ctx.font = `900 ${fontPx}px "${fontFamily}", "Pretendard", "Noto Sans KR", sans-serif`;
+      clampedLines = lines.flatMap(line => wrapLineByWidth(line)).slice(0, titleMaxLines);
+      secondBottom = topPx + metrics.ascent + (Math.max(1, clampedLines.length) - 1) * metrics.lineHeight + metrics.descent;
+    }
+
+    return {
+      lines: clampedLines,
+      fontPx: Math.max(10, Math.round(fontPx)),
+      lineHeightPx: Math.max(12, Math.round(metrics.lineHeight)),
+      topPercent,
+    };
+  }, [
+    previewFrameWidth,
+    ui.finalVideo.templateTitleText,
+    ui.finalVideo.templateTitleFontFamily,
+    ui.finalVideo.templateTitleScale,
+    ui.finalVideo.templateTitleLine1TopMm,
+    ui.finalVideo.templateTitleLine2BottomMm,
+    ui.finalVideo.templateTitleMaxLines,
+    ui.finalVideo.subtitlePreset,
+    SUBTITLE_PRESETS,
+  ]);
 
   const previewSubtitleFontPx = React.useMemo(() => {
     const preset = SUBTITLE_PRESETS[ui.finalVideo.subtitlePreset] as any;
@@ -258,10 +344,6 @@ export default function Panel12Section(props: Props) {
     const maxChars = Math.max(12, Number(ui.finalVideo.subtitleMaxChars || 24));
     return splitSubtitleLines(String(sourceText), maxChars).filter(Boolean).slice(0, 2);
   }, [ui.finalVideo.slides, ui.finalVideo.activeSlide, ui.cuts.items, ui.finalVideo.subtitleMaxChars]);
-
-  const previewTitleLines = React.useMemo(() => {
-    return splitTitlePreviewLines(String(ui.finalVideo.templateTitleText || ''));
-  }, [ui.finalVideo.templateTitleText]);
 
   const previewExtraOverlays = React.useMemo(() => {
     const previewHeight = previewFrameWidth * (16 / 9);
@@ -284,22 +366,123 @@ export default function Panel12Section(props: Props) {
       .filter((item: any) => item.text.trim().length > 0);
   }, [ui.finalVideo.textOverlays, previewFrameWidth]);
 
-  const previewTitleTopPercent = React.useMemo(() => {
-    const previewHeight = previewFrameWidth * (16 / 9);
-    const topMm = Math.max(0, Number(ui.finalVideo.templateTitleLine1TopMm || 20));
-    const topPx = mmToPxScaled(topMm, previewFrameWidth);
-    return Math.max(1, Math.min(95, (topPx / Math.max(1, previewHeight)) * 100));
-  }, [previewFrameWidth, ui.finalVideo.templateTitleLine1TopMm]);
-
   const previewTitleHighlightToken = React.useMemo(
     () => cleanWordToken(String(ui.finalVideo.templateTitleHighlightWord || '')),
     [ui.finalVideo.templateTitleHighlightWord],
   );
 
+  const previewVideoContainerStyle = React.useMemo(() => {
+    const x = Math.max(0, Math.min(95, Number(ui.finalVideo.videoContainerXPercent || 0)));
+    const y = Math.max(0, Math.min(95, Number(ui.finalVideo.videoContainerYPercent || 0)));
+    const w = Math.max(5, Math.min(100 - x, Number(ui.finalVideo.videoContainerWidthPercent || 100)));
+    const h = Math.max(5, Math.min(100 - y, Number(ui.finalVideo.videoContainerHeightPercent || 100)));
+    const radius = Math.max(0, Number(ui.finalVideo.videoContainerRadiusPx || 0));
+    return {
+      left: `${x}%`,
+      top: `${y}%`,
+      width: `${w}%`,
+      height: `${h}%`,
+      borderRadius: `${radius}px`,
+    };
+  }, [
+    ui.finalVideo.videoContainerXPercent,
+    ui.finalVideo.videoContainerYPercent,
+    ui.finalVideo.videoContainerWidthPercent,
+    ui.finalVideo.videoContainerHeightPercent,
+    ui.finalVideo.videoContainerRadiusPx,
+  ]);
+
   const jumpToEditorSection = (id: string) => {
     const target = document.getElementById(id);
     if (!target) return;
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const getDragMetrics = (clientX: number, clientY: number) => {
+    const frame = previewFrameRef.current;
+    if (!frame) return null;
+    const rect = frame.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const xPct = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
+    const yPct = Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100));
+    const grid = Math.max(1, Math.min(10, Math.round((yPct / 100) * 9 + 1)));
+    const mm = Math.max(0, ((yPct / 100) * rect.height) / (MM_TO_PX_1080 * (rect.width / 1080)));
+    return { xPct, yPct, grid, mm };
+  };
+
+  const applyDragToState = (target: 'title' | 'subtitle' | 'overlay', overlayId: string | null, clientX: number, clientY: number) => {
+    const metrics = getDragMetrics(clientX, clientY);
+    if (!metrics) return;
+    if (target === 'title') {
+      setUi((prev: any) => ({
+        ...prev,
+        finalVideo: {
+          ...prev.finalVideo,
+          templateTitleLine1TopMm: Number(metrics.mm.toFixed(1)),
+          templateTitleLine2BottomMm: Math.max(Number(metrics.mm.toFixed(1)) + 24, Number(prev.finalVideo.templateTitleLine2BottomMm || 0)),
+        },
+      }));
+      return;
+    }
+    if (target === 'subtitle') {
+      setUi((prev: any) => ({
+        ...prev,
+        finalVideo: {
+          ...prev.finalVideo,
+          subtitleGridPosition: metrics.grid,
+          subtitlePosition: metrics.grid <= 5 ? 'middle' : 'bottom',
+        },
+      }));
+      return;
+    }
+    if (target === 'overlay' && overlayId) {
+      const nextAlign = metrics.xPct < 33 ? 'left' : metrics.xPct > 66 ? 'right' : 'center';
+      setUi((prev: any) => ({
+        ...prev,
+        finalVideo: {
+          ...prev.finalVideo,
+          textOverlays: (prev.finalVideo.textOverlays || []).map((item: any) =>
+            item.id === overlayId
+              ? { ...item, gridPosition: metrics.grid, align: nextAlign }
+              : item,
+          ),
+        },
+      }));
+    }
+  };
+
+  const startPreviewDrag = (target: 'title' | 'subtitle' | 'overlay', overlayId: string | null, e: React.MouseEvent) => {
+    e.preventDefault();
+    const onMove = (event: MouseEvent) => {
+      applyDragToState(target, overlayId, event.clientX, event.clientY);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const startPreviewTouchDrag = (target: 'title' | 'subtitle' | 'overlay', overlayId: string | null, e: React.TouchEvent) => {
+    const first = e.touches?.[0];
+    if (!first) return;
+    e.preventDefault();
+    applyDragToState(target, overlayId, first.clientX, first.clientY);
+    const onMove = (event: TouchEvent) => {
+      const touch = event.touches?.[0];
+      if (!touch) return;
+      event.preventDefault();
+      applyDragToState(target, overlayId, touch.clientX, touch.clientY);
+    };
+    const onEnd = () => {
+      window.removeEventListener('touchmove', onMove as any);
+      window.removeEventListener('touchend', onEnd);
+      window.removeEventListener('touchcancel', onEnd);
+    };
+    window.addEventListener('touchmove', onMove as any, { passive: false });
+    window.addEventListener('touchend', onEnd, { passive: false });
+    window.addEventListener('touchcancel', onEnd, { passive: false });
   };
 
   const cutSlots = React.useMemo(() => {
@@ -675,7 +858,7 @@ export default function Panel12Section(props: Props) {
                       영상편집에서 설정
                     </button>
                   </div>
-                  <p className="text-[10px] text-slate-400">효과음은 자동 오류를 줄이기 위해 12번에서 비활성화했습니다. 13번 영상편집(준비중)에서 최종 수동 적용하도록 이동됩니다.</p>
+                  <p className="text-[10px] text-slate-400">효과음은 자동 오류를 줄이기 위해 비활성화 상태입니다. 추후 12번에서 안전 모드로 순차 제공됩니다.</p>
                   <div className="flex items-center justify-between gap-3 pt-1">
                     <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">자막</label>
                     <button
@@ -922,6 +1105,44 @@ export default function Panel12Section(props: Props) {
                                 onChange={(v) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleScale: Number(v) } }))}
                                 className="w-full accent-emerald-300"
                               />
+                              <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                제목 줄수 제한
+                                <select
+                                  value={Number(ui.finalVideo.templateTitleMaxLines || 2)}
+                                  onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, templateTitleMaxLines: Math.max(1, Math.min(4, Number(e.target.value || 2))) } }))}
+                                  className="w-16 bg-transparent text-right outline-none"
+                                >
+                                  <option value={1}>1줄</option>
+                                  <option value={2}>2줄</option>
+                                  <option value={3}>3줄</option>
+                                  <option value={4}>4줄</option>
+                                </select>
+                              </label>
+                              <div className="space-y-2 pt-1">
+                                <p className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">영상 컨테이너 레이아웃 (9:16 기준)</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                    X%
+                                    <input type="number" min="0" max="95" step="1" value={Number(ui.finalVideo.videoContainerXPercent || 0)} onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, videoContainerXPercent: Number(e.target.value || 0) } }))} className="w-12 bg-transparent text-right outline-none" />
+                                  </label>
+                                  <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                    Y%
+                                    <input type="number" min="0" max="95" step="1" value={Number(ui.finalVideo.videoContainerYPercent || 0)} onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, videoContainerYPercent: Number(e.target.value || 0) } }))} className="w-12 bg-transparent text-right outline-none" />
+                                  </label>
+                                  <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                    W%
+                                    <input type="number" min="5" max="100" step="1" value={Number(ui.finalVideo.videoContainerWidthPercent || 100)} onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, videoContainerWidthPercent: Number(e.target.value || 100) } }))} className="w-12 bg-transparent text-right outline-none" />
+                                  </label>
+                                  <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5">
+                                    H%
+                                    <input type="number" min="5" max="100" step="1" value={Number(ui.finalVideo.videoContainerHeightPercent || 100)} onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, videoContainerHeightPercent: Number(e.target.value || 100) } }))} className="w-12 bg-transparent text-right outline-none" />
+                                  </label>
+                                  <label className="text-[10px] text-slate-300 flex items-center justify-between gap-2 bg-black/20 border border-white/10 rounded-lg px-2 py-1.5 col-span-2">
+                                    Radius(px)
+                                    <input type="number" min="0" max="80" step="1" value={Number(ui.finalVideo.videoContainerRadiusPx || 0)} onChange={(e) => setUi((prev: any) => ({ ...prev, finalVideo: { ...prev.finalVideo, videoContainerRadiusPx: Number(e.target.value || 0) } }))} className="w-16 bg-transparent text-right outline-none" />
+                                  </label>
+                                </div>
+                              </div>
                             </>
                           )}
                         </div>
@@ -1270,6 +1491,27 @@ export default function Panel12Section(props: Props) {
                   </button>
                 </div>
               )}
+              <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 space-y-1">
+                <div className="flex items-center justify-between gap-3">
+                  <label className="text-[10px] text-slate-300 font-black uppercase tracking-widest">내보내기 재생속도</label>
+                  <span className="text-[10px] font-black text-emerald-200">{Number(ui.finalVideo.exportSpeed || 1).toFixed(2)}x</span>
+                </div>
+                <input
+                  type="range"
+                  min={0.75}
+                  max={1.5}
+                  step={0.05}
+                  value={Number(ui.finalVideo.exportSpeed || 1)}
+                  onChange={(e) => setUi((prev: any) => ({
+                    ...prev,
+                    finalVideo: {
+                      ...prev.finalVideo,
+                      exportSpeed: Number(e.target.value || 1),
+                    },
+                  }))}
+                  className="w-full"
+                />
+              </div>
               {ui.finalVideo.ffmpegNote && (
                 <p className="text-[10px] text-indigo-200 bg-indigo-500/10 border border-indigo-400/20 rounded-lg px-3 py-2">
                   {ui.finalVideo.ffmpegNote}
@@ -1327,6 +1569,7 @@ export default function Panel12Section(props: Props) {
                   );
                 })}
               </div>
+              <p className="text-[10px] text-slate-400">제목/자막/추가텍스트를 마우스 또는 터치로 직접 드래그해 위치를 조정할 수 있습니다.</p>
               {ui.finalVideo.url ? (
                 <div ref={previewFrameRef} className="w-full max-w-[360px] mx-auto bg-black rounded-2xl overflow-hidden relative border border-white/10" style={{ aspectRatio: '9 / 16' }}>
                   {ui.finalVideo.url.startsWith('data:image') ? (
@@ -1371,7 +1614,9 @@ export default function Panel12Section(props: Props) {
                     {previewExtraOverlays.map((item: any) => (
                       <div
                         key={`overlay-url-${item.id}`}
-                        className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] rounded-lg border border-white/15 px-2 py-1"
+                        onMouseDown={(e) => startPreviewDrag('overlay', item.id, e)}
+                        onTouchStart={(e) => startPreviewTouchDrag('overlay', item.id, e)}
+                        className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] rounded-lg border border-white/15 px-2 py-1 cursor-move pointer-events-auto"
                         style={{
                           top: `${gridPositionToPercent(item.gridPosition)}%`,
                           background: item.bgColor || 'rgba(15,23,42,0.55)',
@@ -1382,6 +1627,7 @@ export default function Panel12Section(props: Props) {
                           whiteSpace: 'pre-wrap',
                           wordBreak: 'break-word',
                           overflowWrap: 'anywhere',
+                          touchAction: 'none',
                         }}
                       >
                         {item.text}
@@ -1392,32 +1638,36 @@ export default function Panel12Section(props: Props) {
               ) : ui.finalVideo.type === 'image_slide' && ui.finalVideo.slides.length > 0 ? (
                 <div className="w-full space-y-3">
                   <div ref={previewFrameRef} className="w-full max-w-[360px] mx-auto bg-black rounded-2xl overflow-hidden relative border border-white/10" style={{ aspectRatio: '9 / 16' }}>
-                    <AnimatePresence mode="wait">
-                      {(() => {
-                        const active = ui.finalVideo.slides[ui.finalVideo.activeSlide];
-                        if (!active) return null;
-                        const animation = SLIDE_MOTION_ANIMATION?.[active.motion] || { initial: {}, animate: {} };
-                        return (
-                          <motion.img
-                            key={`${active.cut}-${ui.finalVideo.activeSlide}`}
-                            src={active.imageUrl}
-                            alt={`slide-${active.cut}`}
-                            className="absolute inset-0 w-full h-full object-cover"
-                            initial={animation.initial}
-                            animate={animation.animate}
-                            exit={{ opacity: 0.2 }}
-                            transition={{ duration: ui.finalVideo.slideDuration, ease: 'linear' }}
-                          />
-                        );
-                      })()}
-                    </AnimatePresence>
+                    <div className="absolute border border-white/15 overflow-hidden" style={previewVideoContainerStyle}>
+                      <AnimatePresence mode="wait">
+                        {(() => {
+                          const active = ui.finalVideo.slides[ui.finalVideo.activeSlide];
+                          if (!active) return null;
+                          const animation = SLIDE_MOTION_ANIMATION?.[active.motion] || { initial: {}, animate: {} };
+                          return (
+                            <motion.img
+                              key={`${active.cut}-${ui.finalVideo.activeSlide}`}
+                              src={active.imageUrl}
+                              alt={`slide-${active.cut}`}
+                              className="absolute inset-0 w-full h-full object-cover"
+                              initial={animation.initial}
+                              animate={animation.animate}
+                              exit={{ opacity: 0.2 }}
+                              transition={{ duration: ui.finalVideo.slideDuration, ease: 'linear' }}
+                            />
+                          );
+                        })()}
+                      </AnimatePresence>
+                    </div>
                     <div className="absolute bottom-2 right-2 bg-black/60 text-[10px] text-emerald-300 px-2 py-1 rounded-md font-black">
                       CUT {ui.finalVideo.slides[ui.finalVideo.activeSlide]?.cut} · {SLIDE_MOTIONS.find(m => m.id === ui.finalVideo.slides[ui.finalVideo.activeSlide]?.motion)?.label}
                     </div>
                     {ui.finalVideo.subtitleEnabled && (
                       <div
+                        onMouseDown={(e) => startPreviewDrag('subtitle', null, e)}
+                        onTouchStart={(e) => startPreviewTouchDrag('subtitle', null, e)}
                         className={`absolute left-1/2 -translate-x-1/2 -translate-y-1/2 w-[84%] rounded-xl border border-white/15 ${ui.finalVideo.subtitlePreset === 'shorts' ? 'bg-black/55' : ui.finalVideo.subtitlePreset === 'docu' ? 'bg-slate-950/70' : 'bg-slate-900/65'}`}
-                        style={{ top: `${gridPositionToPercent(ui.finalVideo.subtitleGridPosition)}%` }}
+                        style={{ top: `${gridPositionToPercent(ui.finalVideo.subtitleGridPosition)}%`, touchAction: 'none' }}
                       >
                         <p
                           className={`font-black drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)] ${ui.finalVideo.subtitlePreset === 'shorts' ? 'text-white' : ui.finalVideo.subtitlePreset === 'docu' ? 'text-slate-100' : 'text-white'}`}
@@ -1437,20 +1687,26 @@ export default function Panel12Section(props: Props) {
                       </div>
                     )}
                     {ui.finalVideo.templateTitleEnabled && Boolean(ui.finalVideo.templateTitleText) && (
-                      <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none" style={{ top: `${previewTitleTopPercent}%` }}>
+                      <div
+                        onMouseDown={(e) => startPreviewDrag('title', null, e)}
+                        onTouchStart={(e) => startPreviewTouchDrag('title', null, e)}
+                        className="absolute left-1/2 -translate-x-1/2 cursor-move"
+                        style={{ top: `${previewTitleLayout.topPercent}%`, touchAction: 'none' }}
+                      >
                         <p
                           className="font-black tracking-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] whitespace-pre-line text-center"
                           style={{
                             color: ui.finalVideo.templateTitleLine1Color || '#ff554a',
                             fontFamily: ui.finalVideo.templateTitleFontFamily || 'Pretendard',
-                            fontSize: `${previewTitleFontPx}px`,
-                            lineHeight: `${Math.round(previewTitleFontPx * 1.1)}px`,
+                            fontSize: `${previewTitleLayout.fontPx}px`,
+                            lineHeight: `${previewTitleLayout.lineHeightPx}px`,
                             maxWidth: `${Math.round(previewFrameWidth * 0.84)}px`,
                             wordBreak: 'break-word',
                             overflowWrap: 'anywhere',
+                            WebkitTextStroke: `${Math.max(1, Math.round(previewTitleLayout.fontPx * 0.12))}px ${ui.finalVideo.templateTitleStrokeColor || 'rgba(0,0,0,0.92)'}`,
                           }}
                         >
-                          {(previewTitleLines.length > 0 ? previewTitleLines : ['']).map((line, idx) => {
+                          {(previewTitleLayout.lines.length > 0 ? previewTitleLayout.lines : ['']).map((line, idx) => {
                             const lineColor = idx === 0
                               ? (ui.finalVideo.templateTitleLine1Color || '#ef4444')
                               : (ui.finalVideo.templateTitleLine2Color || '#111111');
@@ -1511,10 +1767,12 @@ export default function Panel12Section(props: Props) {
                           <p className="absolute left-[6%] bottom-[8%] text-white/75 text-[11px] font-black">Your name</p>
                         </>
                       )}
-                      {previewExtraOverlays.map((item: any) => (
+                    {previewExtraOverlays.map((item: any) => (
                         <div
                           key={`overlay-slide-${item.id}`}
-                          className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] rounded-lg border border-white/15 px-2 py-1"
+                          onMouseDown={(e) => startPreviewDrag('overlay', item.id, e)}
+                          onTouchStart={(e) => startPreviewTouchDrag('overlay', item.id, e)}
+                          className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] rounded-lg border border-white/15 px-2 py-1 cursor-move pointer-events-auto"
                           style={{
                             top: `${gridPositionToPercent(item.gridPosition)}%`,
                             background: item.bgColor || 'rgba(15,23,42,0.55)',
@@ -1525,6 +1783,7 @@ export default function Panel12Section(props: Props) {
                             whiteSpace: 'pre-wrap',
                             wordBreak: 'break-word',
                             overflowWrap: 'anywhere',
+                            touchAction: 'none',
                           }}
                         >
                           {item.text}
