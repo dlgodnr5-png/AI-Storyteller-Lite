@@ -219,7 +219,7 @@ const getSlideTimelineDurationSec = (slide: any, fallback: number) => {
 };
 
 const PRODUCT_PROMO_MAX_IMAGES = 7;
-const PRODUCT_PROMO_AUTO_STYLE = '11. photorealistic';
+const PRODUCT_PROMO_AUTO_STYLE = '11. Photorealistic';
 const PRODUCT_MATCH_HIGH_THRESHOLD = 80;
 const PRODUCT_MATCH_MEDIUM_THRESHOLD = 70;
 
@@ -7640,7 +7640,7 @@ ${JSON.stringify(cutPayload)}`,
           </div>
           <button
             onClick={() => {
-              void runProductPromoOneClick();
+              void runProductPromoOneClick(productPromoPlan.workflowMode === 'manual');
             }}
             disabled={(!((ui.productPromo.referenceImages || []).length > 0 || Boolean(String(ui.productPromo.imageUrl || '').trim()))) || ui.productPromo.running || ui.autoFlow.running}
             className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all disabled:opacity-40 ${ui.productPromo.running ? 'running-gradient text-black' : 'bg-fuchsia-500 hover:bg-fuchsia-400 text-white'}`}
