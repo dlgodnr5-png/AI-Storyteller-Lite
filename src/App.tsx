@@ -208,7 +208,7 @@ const resolveVideoCutDurationSec = (scriptType?: string) =>
     ? LONGFORM_VIDEO_DURATION_SEC
     : SHORTS_VIDEO_DURATION_SEC;
 
-const AUTO_DONE_MESSAGE = '설명: 자동생성이 완료되었습니다. 상세 설정 마무리 하시고 슬라이드 구성과 렌더링을 마무리 하세요.';
+const AUTO_DONE_MESSAGE = '설명: 자동생성이 완료되었습니다. 상세 설정 마무리 하시고 슬라이드 구성과 렌더링을 마무리 하세요. 유튜브 정책에 의거하여 최종 영상편집은 사용자가 하여야 합니다.';
 
 const getSlideTimelineDurationSec = (slide: any, fallback: number) => {
   if (Number(slide?.duration || 0) > 0) return Math.max(0.2, Number(slide.duration));
@@ -1007,7 +1007,7 @@ const resolveProductPromoPlan = (productPromo: any) => {
   const manualHookVideoCount = Number(productPromo?.manualHookVideoCount || 1) >= 2 ? 2 : 1;
 
   if (workflowMode === 'auto') {
-    const targetCuts = Math.max(3, Math.min(24, Number(productPromo?.targetCuts || 7)));
+    const targetCuts = Math.max(3, Math.min(24, Number(productPromo?.targetCuts || 5)));
     const targetSeconds = targetCuts * IMAGE_SLIDE_DURATION_SEC;
     return {
       workflowMode,
@@ -2177,11 +2177,11 @@ export default function App() {
       running: false,
       step: '',
       error: '',
-      targetSeconds: 7 * IMAGE_SLIDE_DURATION_SEC,
+      targetSeconds: 5 * IMAGE_SLIDE_DURATION_SEC,
       renderMode: 'image_slide' as 'ai_video' | 'image_slide',
       hookVideoCount: 0,
       manualHookVideoCount: 1,
-      targetCuts: 7,
+      targetCuts: 5,
       autoQueuePublish: false,
       autoScheduleMinutes: 60,
       autoQueuePending: false,
@@ -4564,7 +4564,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
 
       setUi(prev => ({ ...prev, autoFlow: { ...prev.autoFlow, running: false, step: '12단계 완료', error: '' } }));
       appendAutoLog('자동 진행 12단계 완료 (최종 렌더/발행은 수동 확인)');
-      showNotice('자동 진행 12단계 완료: 12번 편집 후 14번 발행하세요.', 'success');
+      showNotice('자동 진행 12단계 완료: 12번 편집 후 14번 발행하세요. 유튜브 정책상 최종 편집은 사용자 확인이 필요합니다.', 'success');
       setAutoDoneModalText(AUTO_DONE_MESSAGE);
       await persistAutoSnapshot(8, 'done');
       await clearAutoSnapshot();
@@ -7493,7 +7493,7 @@ ${JSON.stringify(cutPayload)}`,
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-3">
           <div>
             <p className="text-xs font-black text-fuchsia-200 uppercase tracking-widest">사진 1장 상품홍보 자동 제작</p>
-            <p className="text-[11px] text-slate-400 mt-1">자동/수동 모드를 선택해 상품쇼츠를 진행합니다. 자동은 21초 고정, 수동은 일반 쇼츠 흐름으로 진행합니다.</p>
+            <p className="text-[11px] text-slate-400 mt-1">자동/수동 모드를 선택해 상품쇼츠를 진행합니다. 자동은 약 20초 고정, 수동은 일반 쇼츠 흐름으로 진행합니다.</p>
           </div>
           <button
             onClick={() => {
@@ -7539,7 +7539,7 @@ ${JSON.stringify(cutPayload)}`,
             <p className="text-[10px] font-black text-fuchsia-200 uppercase tracking-widest">진행 방식</p>
             <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={() => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, workflowMode: 'auto', renderMode: 'image_slide', strictProductLock: true, hookVideoCount: 0, targetCuts: 7, targetSeconds: 7 * IMAGE_SLIDE_DURATION_SEC } }))}
+                onClick={() => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, workflowMode: 'auto', renderMode: 'image_slide', strictProductLock: true, hookVideoCount: 0, targetCuts: 5, targetSeconds: 5 * IMAGE_SLIDE_DURATION_SEC } }))}
                 className={`py-2 rounded-lg text-[10px] font-black border transition-all ${productPromoPlan.workflowMode === 'auto' ? 'bg-fuchsia-400 text-black border-fuchsia-300' : 'bg-white/5 text-slate-300 border-white/15'}`}
               >
                 자동
@@ -7578,10 +7578,10 @@ ${JSON.stringify(cutPayload)}`,
             </div>
             <p className="text-[10px] text-slate-500">
               {productPromoPlan.workflowMode === 'auto'
-                ? '자동 모드: 7컷 x 3초 = 21초 고정 (이미지 슬라이드)'
+                ? '자동모드: 이미지 슬라이드가 4초로 고정되어 진행됩니다.'
                 : productPromoPlan.renderMode === 'ai_video'
                   ? '수동 AI비디오: 5컷 x 4초 = 20초 고정'
-                  : '수동 이미지슬라이드: 영상훅 1/2컷 + 이미지컷으로 19~20초 고정'}
+                  : '수동 이미지슬라이드: 영상 1컷(4초)+이미지 5컷(4초)=24초 / 영상 2컷(8초)+이미지 4컷(4초)=24초'}
             </p>
           </div>
           <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
@@ -7606,7 +7606,7 @@ ${JSON.stringify(cutPayload)}`,
                 영상 2컷
               </button>
             </div>
-            <p className="text-[10px] text-slate-500">수동 이미지슬라이드: 영상 1컷(4초)+이미지 5컷(3초)=19초 / 영상 2컷(8초)+이미지 4컷(3초)=20초</p>
+            <p className="text-[10px] text-slate-500">수동 이미지슬라이드: 영상 1컷(4초)+이미지 5컷(4초)=24초 / 영상 2컷(8초)+이미지 4컷(4초)=24초</p>
           </div>
           <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
             <p className="text-[10px] font-black text-fuchsia-200 uppercase tracking-widest">상품 원본 고정</p>
@@ -7688,7 +7688,7 @@ ${JSON.stringify(cutPayload)}`,
         <div className="rounded-xl border border-white/10 bg-black/20 p-3 mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
             <p className="text-[10px] font-black text-fuchsia-200 uppercase tracking-widest">발행 자동화 옵션</p>
-            <p className="text-[10px] text-slate-400 mt-1">자동 제작 완료 후 13/14번을 자동 준비합니다. 필요하면 즉시 발행 작업까지 자동 등록할 수 있습니다.</p>
+            <p className="text-[10px] text-slate-400 mt-1">자동 제작 완료 후 12/14번을 자동 준비합니다. 필요하면 즉시 발행 작업까지 자동 등록할 수 있습니다.</p>
           </div>
           <div className="flex items-center gap-2">
             <select
@@ -7803,9 +7803,10 @@ ${JSON.stringify(cutPayload)}`,
             <p className="text-[10px] text-slate-500">이미지는 최대 {PRODUCT_PROMO_MAX_IMAGES}장까지 업로드할 수 있습니다.</p>
             <div className="rounded-lg border border-white/10 bg-black/30 p-2 space-y-1">
               <p className="text-[10px] font-black text-fuchsia-200">컷 배치 규칙</p>
-              <p className="text-[10px] text-slate-400">자동: 7컷 x 3초 = 21초 (업로드 1~7장을 순환 배치)</p>
-              <p className="text-[10px] text-slate-400">수동/이미지슬라이드: 영상훅 1컷=19초, 2컷=20초</p>
+              <p className="text-[10px] text-slate-400">자동: TTS 실측 길이/4초 반올림 컷으로 구성 (이미지 슬라이드 4초 고정)</p>
+              <p className="text-[10px] text-slate-400">수동/이미지슬라이드: 영상훅 1컷=24초, 2컷=24초</p>
               <p className="text-[10px] text-slate-400">수동/AI비디오: 5컷 x 4초 = 20초 (영상 5컷 필요)</p>
+              <p className="text-[10px] text-rose-300 font-black">경고: 외부 영상은 4초로 제작해 업로드하세요. 업로드 시 4초 이상 절대 사용금지 (초과 구간 자동 폐기)</p>
             </div>
           </div>
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-2">
@@ -7816,7 +7817,7 @@ ${JSON.stringify(cutPayload)}`,
               <p className="text-[10px] text-amber-200">발행 자동등록 대기 중: {publishReadiness.failed.map(item => item.label).join(', ') || '요건 충족 확인 중'}</p>
             )}
             {productPromoPlan.renderMode === 'image_slide' && (
-              <p className="text-[10px] text-slate-500">11번 패널의 영상 자산은 수동 모드(영상훅 1/2 선택)에서만 반영됩니다. 자동 모드는 업로드된 상품 이미지 7컷 고정입니다.</p>
+              <p className="text-[10px] text-slate-500">11번 패널의 영상 자산은 수동 모드(영상훅 1/2 선택)에서만 반영됩니다. 자동 모드는 TTS 실측 길이 기준으로 4초 컷이 자동 산출됩니다.</p>
             )}
             <div className="flex flex-wrap gap-2 pt-1">
               <button
@@ -9371,11 +9372,15 @@ ${JSON.stringify(cutPayload)}`,
                                   } catch {
                                     durationSec = 0;
                                   }
+                                  const clampedDurationSec = Math.min(SHORTS_VIDEO_DURATION_SEC, Math.max(0, Number(durationSec || 0)));
+                                  if (durationSec > SHORTS_VIDEO_DURATION_SEC + 0.01) {
+                                    showNotice('경고: 업로드 영상이 4초를 초과해 앞 4초만 사용됩니다.', 'error');
+                                  }
                                   setUi(prev => ({
                                     ...prev,
                                     videoJobs: prev.videoJobs.some((j: any) => j.cut === cut.index)
-                                      ? prev.videoJobs.map((j: any) => j.cut === cut.index ? { ...j, videoUrl: url, status: '업로드됨', name: file.name, durationSec } : j)
-                                      : [...prev.videoJobs, { cut: cut.index, videoUrl: url, status: '업로드됨', name: file.name, durationSec }],
+                                      ? prev.videoJobs.map((j: any) => j.cut === cut.index ? { ...j, videoUrl: url, status: durationSec > SHORTS_VIDEO_DURATION_SEC + 0.01 ? '업로드됨(앞 4초 고정)' : '업로드됨', name: file.name, durationSec: clampedDurationSec, sourceDurationSec: durationSec } : j)
+                                      : [...prev.videoJobs, { cut: cut.index, videoUrl: url, status: durationSec > SHORTS_VIDEO_DURATION_SEC + 0.01 ? '업로드됨(앞 4초 고정)' : '업로드됨', name: file.name, durationSec: clampedDurationSec, sourceDurationSec: durationSec }],
                                   }));
                                 }}
                               />
