@@ -1010,13 +1010,15 @@ const resolveProductPromoPlan = (productPromo: any) => {
 
   if (workflowMode === 'auto') {
     const targetCuts = Math.max(3, Math.min(24, Number(productPromo?.targetCuts || 5)));
-    const targetSeconds = targetCuts * IMAGE_SLIDE_DURATION_SEC;
+    const isAutoAiVideo = renderMode === 'ai_video';
+    const perCutSec = isAutoAiVideo ? SHORTS_VIDEO_DURATION_SEC : IMAGE_SLIDE_DURATION_SEC;
+    const targetSeconds = targetCuts * perCutSec;
     return {
       workflowMode,
-      renderMode: 'image_slide' as const,
+      renderMode: isAutoAiVideo ? ('ai_video' as const) : ('image_slide' as const),
       targetCuts,
-      hookVideoCount: 0,
-      slideDuration: IMAGE_SLIDE_DURATION_SEC,
+      hookVideoCount: isAutoAiVideo ? targetCuts : 0,
+      slideDuration: perCutSec,
       targetSeconds,
       scriptLength: `${targetSeconds}초`,
     };
@@ -4845,7 +4847,8 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       showNotice('Gemini API 키가 필요합니다.', 'error');
       return;
     }
-    if ((ui.productPromo.referenceImages || []).length === 0) {
+    const hasProductSource = (ui.productPromo.referenceImages || []).length > 0 || Boolean(String(ui.productPromo.imageUrl || '').trim());
+    if (!hasProductSource) {
       showNotice('상품 사진을 먼저 업로드해 주세요.', 'error');
       return;
     }
@@ -5038,18 +5041,18 @@ JSON만 반환:
         },
         finalVideo: {
           ...prev.finalVideo,
-          type: 'image_slide',
-          slideDuration: IMAGE_SLIDE_DURATION_SEC,
-          useHybridHookVideos: false,
-          hookVideoCount: 0,
+          type: plan.renderMode,
+          slideDuration: plan.slideDuration,
+          useHybridHookVideos: plan.renderMode === 'image_slide' ? plan.hookVideoCount > 0 : false,
+          hookVideoCount: plan.hookVideoCount,
           modifications: String(parsed?.visualGuide || prev.finalVideo.modifications || ''),
         },
         productPromo: {
           ...prev.productPromo,
           workflowMode: 'auto',
           strictProductLock: true,
-          renderMode: 'image_slide',
-          hookVideoCount: 0,
+          renderMode: plan.renderMode,
+          hookVideoCount: plan.hookVideoCount,
           targetCuts: plan.targetCuts,
           targetSeconds: plan.targetSeconds,
           step: '자동 제작 중',
@@ -5132,8 +5135,8 @@ JSON만 반환:
 
       const ok = await runOneClickFromTitle(hookTitle, {
         productMode: true,
-        productRenderMode: 'image_slide',
-        productHookVideoCount: 0,
+        productRenderMode: plan.renderMode,
+        productHookVideoCount: plan.hookVideoCount,
         productTargetCuts: plan.targetCuts,
         productTargetSeconds: plan.targetSeconds,
       });
@@ -7660,7 +7663,7 @@ ${JSON.stringify(cutPayload)}`,
               }));
               showNotice('수동 모드 기준 설정을 적용했습니다. 일반 쇼츠처럼 단계별로 진행하세요.', 'success');
             }}
-            disabled={(ui.productPromo.referenceImages || []).length === 0 || ui.productPromo.running || ui.autoFlow.running}
+            disabled={(!((ui.productPromo.referenceImages || []).length > 0 || Boolean(String(ui.productPromo.imageUrl || '').trim()))) || ui.productPromo.running || ui.autoFlow.running}
             className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all disabled:opacity-40 ${ui.productPromo.running ? 'running-gradient text-black' : 'bg-fuchsia-500 hover:bg-fuchsia-400 text-white'}`}
           >
             {ui.productPromo.running ? '자동 제작 중...' : productPromoPlan.workflowMode === 'auto' ? '상품홍보 자동 실행' : '수동 진행 설정 적용 실행'}
@@ -7671,7 +7674,18 @@ ${JSON.stringify(cutPayload)}`,
             <p className="text-[10px] font-black text-fuchsia-200 uppercase tracking-widest">진행 방식</p>
             <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={() => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, workflowMode: 'auto', renderMode: 'image_slide', strictProductLock: true, hookVideoCount: 0, targetCuts: 5, targetSeconds: 5 * IMAGE_SLIDE_DURATION_SEC } }))}
+                onClick={() => setUi(prev => ({
+                  ...prev,
+                  productPromo: {
+                    ...prev.productPromo,
+                    workflowMode: 'auto',
+                    renderMode: prev.productPromo.renderMode === 'ai_video' ? 'ai_video' : 'image_slide',
+                    strictProductLock: true,
+                    hookVideoCount: prev.productPromo.renderMode === 'ai_video' ? Number(prev.productPromo.targetCuts || 5) : 0,
+                    targetCuts: Math.max(3, Math.min(24, Number(prev.productPromo.targetCuts || 5))),
+                    targetSeconds: Math.max(3, Math.min(24, Number(prev.productPromo.targetCuts || 5))) * (prev.productPromo.renderMode === 'ai_video' ? SHORTS_VIDEO_DURATION_SEC : IMAGE_SLIDE_DURATION_SEC),
+                  },
+                }))}
                 className={`py-2 rounded-lg text-[10px] font-black border transition-all ${productPromoPlan.workflowMode === 'auto' ? 'bg-fuchsia-400 text-black border-fuchsia-300' : 'bg-white/5 text-slate-300 border-white/15'}`}
               >
                 자동
@@ -7695,7 +7709,6 @@ ${JSON.stringify(cutPayload)}`,
               </button>
               <button
                 onClick={() => setUi(prev => ({ ...prev, productPromo: { ...prev.productPromo, renderMode: 'ai_video' } }))}
-                disabled={productPromoPlan.workflowMode === 'auto'}
                 className={`py-2 rounded-lg text-[10px] font-black border transition-all ${ui.productPromo.renderMode === 'ai_video' ? 'bg-fuchsia-400 text-black border-fuchsia-300' : 'bg-white/5 text-slate-300 border-white/15'}`}
               >
                 AI 비디오
@@ -7710,7 +7723,9 @@ ${JSON.stringify(cutPayload)}`,
             </div>
             <p className="text-[10px] text-slate-500">
               {productPromoPlan.workflowMode === 'auto'
-                ? '자동모드: 이미지 슬라이드가 4초로 고정되어 진행됩니다.'
+                ? (productPromoPlan.renderMode === 'ai_video'
+                  ? '자동모드(AI비디오): 1컷 4초로 자동 구성됩니다.'
+                  : '자동모드(이미지슬라이드): 1컷 4초로 자동 구성됩니다.')
                 : productPromoPlan.renderMode === 'ai_video'
                   ? '수동 AI비디오: 5컷 x 4초 = 20초 고정'
                   : '수동 이미지슬라이드: 영상 1컷(4초)+이미지 5컷(4초)=24초 / 영상 2컷(8초)+이미지 4컷(4초)=24초'}
@@ -8025,7 +8040,9 @@ ${JSON.stringify(cutPayload)}`,
             <p className="text-[10px] text-slate-500">이미지는 최대 {PRODUCT_PROMO_MAX_IMAGES}장까지 업로드할 수 있습니다.</p>
             <div className="rounded-lg border border-white/10 bg-black/30 p-2 space-y-1">
               <p className="text-[10px] font-black text-fuchsia-200">컷 배치 규칙</p>
-              <p className="text-[10px] text-slate-400">자동: TTS 실측 길이/4초 반올림 컷으로 구성 (이미지 슬라이드 4초 고정)</p>
+              <p className="text-[10px] text-slate-400">
+                자동: TTS 실측 길이/4초 반올림 컷으로 구성 ({productPromoPlan.renderMode === 'ai_video' ? 'AI 비디오 컷 4초 고정' : '이미지 슬라이드 4초 고정'})
+              </p>
               <p className="text-[10px] text-slate-400">수동/이미지슬라이드: 영상훅 1컷=24초, 2컷=24초</p>
               <p className="text-[10px] text-slate-400">수동/AI비디오: 5컷 x 4초 = 20초 (영상 5컷 필요)</p>
               <p className="text-[10px] text-rose-300 font-black">경고: 외부 영상은 4초로 제작해 업로드하세요. 업로드 시 4초 이상 절대 사용금지 (초과 구간 자동 폐기)</p>
@@ -8046,7 +8063,7 @@ ${JSON.stringify(cutPayload)}`,
               {ui.productPromo.matchLevel === 'low' && !ui.productPromo.running && (
                 <button
                   onClick={() => void runProductPromoOneClick(true)}
-                  disabled={(ui.productPromo.referenceImages || []).length === 0 || ui.autoFlow.running}
+                  disabled={(!((ui.productPromo.referenceImages || []).length > 0 || Boolean(String(ui.productPromo.imageUrl || '').trim()))) || ui.autoFlow.running}
                   className="mt-1.5 px-2.5 py-1 rounded-md text-[10px] font-black bg-amber-400 text-black border border-amber-300 disabled:opacity-40"
                 >
                   일치도 확인 후 계속 실행
