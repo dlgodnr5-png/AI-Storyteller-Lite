@@ -220,6 +220,8 @@ const getSlideTimelineDurationSec = (slide: any, fallback: number) => {
 
 const PRODUCT_PROMO_MAX_IMAGES = 7;
 const PRODUCT_PROMO_AUTO_STYLE = '11. photorealistic';
+const PRODUCT_MATCH_HIGH_THRESHOLD = 80;
+const PRODUCT_MATCH_MEDIUM_THRESHOLD = 70;
 
 const splitToFixedLines = (text: string, maxLineChars: number, maxLines: number) => {
   const compact = text.replace(/\s+/g, ' ').trim();
@@ -1099,7 +1101,12 @@ const assessProductMatchConfidence = (input: {
   }
 
   const boundedScore = Math.max(0, Math.min(100, Math.round(score)));
-  const level: 'low' | 'medium' | 'high' = boundedScore >= 80 ? 'high' : boundedScore >= 60 ? 'medium' : 'low';
+  const level: 'low' | 'medium' | 'high' =
+    boundedScore >= PRODUCT_MATCH_HIGH_THRESHOLD
+      ? 'high'
+      : boundedScore >= PRODUCT_MATCH_MEDIUM_THRESHOLD
+        ? 'medium'
+        : 'low';
   return {
     score: boundedScore,
     level,
@@ -4833,7 +4840,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
     });
   };
 
-  const runProductPromoOneClick = async () => {
+  const runProductPromoOneClick = async (forceContinue = false) => {
     if (!keys.g1) {
       showNotice('Gemini API 키가 필요합니다.', 'error');
       return;
@@ -5071,6 +5078,50 @@ JSON만 반환:
           },
         },
       }));
+
+      if (productMatch.level === 'low' && !forceContinue) {
+        setUi(prev => ({
+          ...prev,
+          productPromo: {
+            ...prev.productPromo,
+            running: false,
+            step: '검수 필요',
+            error: `상품 일치도 ${productMatch.score}점으로 자동 진행을 중단했습니다. 일치도 확인 후 계속 실행을 눌러주세요.`,
+            autoQueuePending: false,
+          },
+        }));
+        showNotice(`상품 일치도 ${productMatch.score}점: 자동 진행 중단(검수 필요)`, 'error');
+        appendAutoLog(`상품홍보 원클릭 중단: 상품 일치도 ${productMatch.score}점`);
+        return;
+      }
+
+      if (productMatch.level === 'medium' && !forceContinue) {
+        setUi(prev => ({
+          ...prev,
+          productPromo: {
+            ...prev.productPromo,
+            running: false,
+            step: '검수 권장',
+            error: `상품 일치도 ${productMatch.score}점입니다. 검수 후 계속 진행할 수 있습니다.`,
+            autoQueuePending: false,
+          },
+        }));
+        const go = window.confirm(`상품 일치도 ${productMatch.score}점 (검수 권장)\n계속 자동 진행하시겠습니까?`);
+        if (!go) {
+          showNotice(`상품 일치도 ${productMatch.score}점: 사용자 검수 대기`, 'info');
+          appendAutoLog(`상품홍보 원클릭 보류: 상품 일치도 ${productMatch.score}점`);
+          return;
+        }
+        setUi(prev => ({
+          ...prev,
+          productPromo: {
+            ...prev.productPromo,
+            running: true,
+            step: '자동 제작 중',
+            error: '',
+          },
+        }));
+      }
 
       if (!latestUiRef.current?.autoFlow?.fixedEnabled) {
         await autoSelectProductVoice(
@@ -7990,6 +8041,16 @@ ${JSON.stringify(cutPayload)}`,
               <p className="text-[10px] text-slate-400">{ui.productPromo.matchSummary || '상품 일치도 분석 대기'}</p>
               {(ui.productPromo.matchIssues || []).length > 0 && (
                 <p className="text-[10px] text-amber-200 mt-0.5">점검: {(ui.productPromo.matchIssues || []).slice(0, 2).join(' / ')}</p>
+              )}
+              <p className="text-[9px] text-slate-500 mt-0.5">기준: high {PRODUCT_MATCH_HIGH_THRESHOLD}점 이상 / medium {PRODUCT_MATCH_MEDIUM_THRESHOLD}~{PRODUCT_MATCH_HIGH_THRESHOLD - 1}점 / low {PRODUCT_MATCH_MEDIUM_THRESHOLD - 1}점 이하</p>
+              {ui.productPromo.matchLevel === 'low' && !ui.productPromo.running && (
+                <button
+                  onClick={() => void runProductPromoOneClick(true)}
+                  disabled={(ui.productPromo.referenceImages || []).length === 0 || ui.autoFlow.running}
+                  className="mt-1.5 px-2.5 py-1 rounded-md text-[10px] font-black bg-amber-400 text-black border border-amber-300 disabled:opacity-40"
+                >
+                  일치도 확인 후 계속 실행
+                </button>
               )}
             </div>
             {ui.productPromo.error && <p className="text-[11px] text-rose-300 font-bold">{ui.productPromo.error}</p>}
