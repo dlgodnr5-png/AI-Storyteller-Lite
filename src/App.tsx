@@ -2389,7 +2389,7 @@ export default function App() {
   }, [hasValidYouTubeAuth]);
 
   useEffect(() => {
-    const hasProductImages = (ui.productPromo.referenceImages || []).length > 0;
+    const hasProductImages = (ui.productPromo.referenceImages || []).length > 0 || Boolean(String(ui.productPromo.imageUrl || '').trim());
     if (!hasProductImages && !ui.productPromo.running) return;
     const plan = resolveProductPromoPlan(ui.productPromo);
     setUi(prev => {
@@ -6293,7 +6293,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
   const handleGenerateFinalVideo = async () => {
     const previousMotionByCut = new Map(ui.finalVideo.slides.map(s => [s.cut, s.motion] as const));
     const productPlan = resolveProductPromoPlan(ui.productPromo);
-    const isProductPromoContext = Boolean((ui.productPromo.referenceImages || []).length > 0);
+    const isProductPromoContext = Boolean((ui.productPromo.referenceImages || []).length > 0 || String(ui.productPromo.imageUrl || '').trim());
     const sortedVideoJobs = ui.videoJobs
       .filter((j: any) => j.videoUrl)
       .sort((a: any, b: any) => a.cut - b.cut);
@@ -6307,8 +6307,11 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
         : 0);
 
     if (isProductPromoContext && productPlan.renderMode === 'ai_video' && sortedVideoJobs.length < desiredHookCount) {
-      showNotice(`AI 비디오 모드는 영상 ${desiredHookCount}컷이 필요합니다. 현재 ${sortedVideoJobs.length}컷만 준비되었습니다.`, 'error', 1400);
-      return;
+      if (sortedVideoJobs.length === 0) {
+        showNotice('AI 비디오 소스가 없어 이미지 슬라이드 모드로 자동 전환합니다.', 'info', 1400);
+      } else {
+        showNotice(`AI 비디오 소스가 부족해 영상 ${sortedVideoJobs.length}컷 + 이미지 컷으로 자동 구성합니다.`, 'info', 1400);
+      }
     }
 
     const resolvedHookCount = Math.min(desiredHookCount, videoCutIds.length);
