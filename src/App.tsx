@@ -4853,11 +4853,19 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       return;
     }
     const plan = resolveProductPromoPlan(ui.productPromo);
-    if (plan.workflowMode !== 'auto') {
-      showNotice('수동 모드에서는 원클릭이 아닌 단계별 수동 진행을 사용해 주세요.', 'info');
-      return;
-    }
     if (latestUiRef.current?.productPromo?.running) return;
+
+    const preparedVideos = (latestUiRef.current?.videoJobs || []).filter((j: any) => j?.videoUrl);
+    const preparedVideoCount = preparedVideos.length;
+    const fallbackToImageSlide = plan.renderMode === 'ai_video' && preparedVideoCount === 0;
+    const effectiveRenderMode: 'ai_video' | 'image_slide' = fallbackToImageSlide ? 'image_slide' : plan.renderMode;
+    const effectiveHookVideoCount = effectiveRenderMode === 'ai_video'
+      ? Math.max(1, Math.min(Number(plan.targetCuts || 5), preparedVideoCount || Number(plan.hookVideoCount || 1)))
+      : Number(plan.hookVideoCount || 0);
+
+    if (fallbackToImageSlide) {
+      showNotice('AI 비디오 소스가 없어 이미지 슬라이드 모드로 자동 전환합니다.', 'info', 1400);
+    }
 
     setUi(prev => ({
       ...prev,
@@ -5041,18 +5049,18 @@ JSON만 반환:
         },
         finalVideo: {
           ...prev.finalVideo,
-          type: plan.renderMode,
+          type: effectiveRenderMode,
           slideDuration: plan.slideDuration,
-          useHybridHookVideos: plan.renderMode === 'image_slide' ? plan.hookVideoCount > 0 : false,
-          hookVideoCount: plan.hookVideoCount,
+          useHybridHookVideos: effectiveRenderMode === 'image_slide' ? effectiveHookVideoCount > 0 : false,
+          hookVideoCount: effectiveHookVideoCount,
           modifications: String(parsed?.visualGuide || prev.finalVideo.modifications || ''),
         },
         productPromo: {
           ...prev.productPromo,
-          workflowMode: 'auto',
-          strictProductLock: true,
-          renderMode: plan.renderMode,
-          hookVideoCount: plan.hookVideoCount,
+          workflowMode: plan.workflowMode as 'auto' | 'manual',
+          strictProductLock: plan.workflowMode === 'auto' ? true : prev.productPromo.strictProductLock,
+          renderMode: effectiveRenderMode,
+          hookVideoCount: effectiveHookVideoCount,
           targetCuts: plan.targetCuts,
           targetSeconds: plan.targetSeconds,
           step: '자동 제작 중',
@@ -5135,8 +5143,8 @@ JSON만 반환:
 
       const ok = await runOneClickFromTitle(hookTitle, {
         productMode: true,
-        productRenderMode: plan.renderMode,
-        productHookVideoCount: plan.hookVideoCount,
+        productRenderMode: effectiveRenderMode,
+        productHookVideoCount: effectiveHookVideoCount,
         productTargetCuts: plan.targetCuts,
         productTargetSeconds: plan.targetSeconds,
       });
@@ -7632,41 +7640,12 @@ ${JSON.stringify(cutPayload)}`,
           </div>
           <button
             onClick={() => {
-              if (productPromoPlan.workflowMode === 'auto') {
-                void runProductPromoOneClick();
-                return;
-              }
-              setUi(prev => ({
-                ...prev,
-                script: {
-                  ...prev.script,
-                  type: 'shorts',
-                  lang: 'KR',
-                  length: productPromoPlan.scriptLength,
-                },
-                videoStyle: {
-                  ...prev.videoStyle,
-                  selected: PRODUCT_PROMO_AUTO_STYLE,
-                },
-                finalVideo: {
-                  ...prev.finalVideo,
-                  type: productPromoPlan.renderMode,
-                  slideDuration: productPromoPlan.slideDuration,
-                  hookVideoCount: productPromoPlan.hookVideoCount,
-                  useHybridHookVideos: productPromoPlan.hookVideoCount > 0,
-                },
-                productPromo: {
-                  ...prev.productPromo,
-                  targetCuts: productPromoPlan.targetCuts,
-                  targetSeconds: productPromoPlan.targetSeconds,
-                },
-              }));
-              showNotice('수동 모드 기준 설정을 적용했습니다. 일반 쇼츠처럼 단계별로 진행하세요.', 'success');
+              void runProductPromoOneClick();
             }}
             disabled={(!((ui.productPromo.referenceImages || []).length > 0 || Boolean(String(ui.productPromo.imageUrl || '').trim()))) || ui.productPromo.running || ui.autoFlow.running}
             className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all disabled:opacity-40 ${ui.productPromo.running ? 'running-gradient text-black' : 'bg-fuchsia-500 hover:bg-fuchsia-400 text-white'}`}
           >
-            {ui.productPromo.running ? '자동 제작 중...' : productPromoPlan.workflowMode === 'auto' ? '상품홍보 자동 실행' : '수동 진행 설정 적용 실행'}
+            {ui.productPromo.running ? '상품쇼츠 제작 중...' : productPromoPlan.workflowMode === 'auto' ? '상품홍보 자동 실행' : '수동 진행 설정 적용 실행'}
           </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
