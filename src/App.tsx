@@ -1048,6 +1048,70 @@ const resolveProductPromoPlan = (productPromo: any) => {
   };
 };
 
+const assessProductMatchConfidence = (input: {
+  productUrl?: string;
+  imageInsight?: any;
+  analysis?: any;
+}) => {
+  const productUrl = String(input.productUrl || '').trim();
+  const imageInsight = input.imageInsight || {};
+  const analysis = input.analysis || {};
+
+  const imageName = normalizeSubtitleText(String(imageInsight.productName || ''));
+  const imageModel = normalizeSubtitleText(String(imageInsight.modelNumber || ''));
+  const imageTexts = normalizeSubtitleText(String(imageInsight.visibleTexts || ''));
+  const aiName = normalizeSubtitleText(String(analysis.productName || ''));
+  const aiModel = normalizeSubtitleText(String(analysis.modelNumber || ''));
+  const aiPurpose = normalizeSubtitleText(String(analysis.usagePurpose || ''));
+
+  let score = 0;
+  const issues: string[] = [];
+
+  if (productUrl) score += 15;
+  else issues.push('상품 URL 미입력');
+
+  if (imageName) score += 20;
+  else issues.push('이미지 기반 품명 추출 부족');
+
+  if (imageModel) score += 15;
+  else issues.push('이미지 기반 제품넘버 추출 부족');
+
+  if (aiName) score += 15;
+  else issues.push('AI 분석 품명 확정 부족');
+
+  if (aiModel) score += 10;
+  else issues.push('AI 분석 제품넘버 확정 부족');
+
+  if (aiPurpose) score += 10;
+  else issues.push('AI 분석 용도 정보 부족');
+
+  if (imageTexts) score += 5;
+
+  const normalizedImageAnchor = [imageName, imageModel].filter(Boolean).join(' ');
+  const normalizedAiAnchor = [aiName, aiModel].filter(Boolean).join(' ');
+  if (normalizedImageAnchor && normalizedAiAnchor) {
+    const consistent =
+      normalizedImageAnchor.includes(normalizedAiAnchor) ||
+      normalizedAiAnchor.includes(normalizedImageAnchor) ||
+      (imageName && aiName && (imageName.includes(aiName) || aiName.includes(imageName)));
+    if (consistent) score += 10;
+    else issues.push('이미지 추출값과 AI 분석값 불일치 가능성');
+  }
+
+  const boundedScore = Math.max(0, Math.min(100, Math.round(score)));
+  const level: 'low' | 'medium' | 'high' = boundedScore >= 80 ? 'high' : boundedScore >= 60 ? 'medium' : 'low';
+  return {
+    score: boundedScore,
+    level,
+    summary: level === 'high'
+      ? '상품 일치도 높음'
+      : level === 'medium'
+        ? '상품 일치도 보통 (검수 권장)'
+        : '상품 일치도 낮음 (수동 확인 필요)',
+    issues,
+  };
+};
+
 const syncProductPromoPlanState = (prev: any) => {
   const plan = resolveProductPromoPlan(prev.productPromo);
   const nextProductPromo = {
@@ -2172,6 +2236,10 @@ export default function App() {
       productComment: '',
       visualAnchor: '',
       detectedTexts: '',
+      matchScore: 0,
+      matchLevel: 'low' as 'low' | 'medium' | 'high',
+      matchSummary: '',
+      matchIssues: [] as string[],
       preferredTtsProvider: 'elevenlabs' as 'gemini' | 'elevenlabs',
       strictProductLock: true,
       running: false,
@@ -4939,6 +5007,11 @@ JSON만 반환:
         config: { responseMimeType: 'application/json' },
       });
       const parsed = JSON.parse(analysis.text || '{}');
+      const productMatch = assessProductMatchConfidence({
+        productUrl,
+        imageInsight,
+        analysis: parsed,
+      });
       const hookTitle = normalizeSubtitleText(String(parsed?.hookTitle || '이 제품이 필요한 이유'));
 
       setUi(prev => ({
@@ -4981,6 +5054,10 @@ JSON만 반환:
             parsed?.usagePurpose ? `용도:${String(parsed.usagePurpose)}` : '',
             parsed?.usageScenarios ? `사용장면:${String(parsed.usageScenarios)}` : '',
           ].filter(Boolean).join(' | '),
+          matchScore: productMatch.score,
+          matchLevel: productMatch.level,
+          matchSummary: productMatch.summary,
+          matchIssues: productMatch.issues,
         },
         description: {
           ...prev.description,
@@ -5022,6 +5099,10 @@ JSON만 반환:
           },
         }));
         return;
+      }
+
+      if (productMatch.level !== 'high') {
+        showNotice(`상품 일치도 ${productMatch.score}점: ${productMatch.summary}`, 'info');
       }
 
       setUi(prev => ({
@@ -7902,6 +7983,15 @@ ${JSON.stringify(cutPayload)}`,
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-2">
             <p className="text-[11px] text-slate-300">목표 길이: <span className="font-black text-white">{productPromoPlan.targetSeconds}초</span></p>
             <p className="text-[11px] text-slate-300">진행 단계: <span className="font-black text-emerald-300">{ui.productPromo.step || '대기'}</span></p>
+            <div className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5">
+              <p className="text-[10px] text-slate-300">
+                상품 일치도: <span className={`font-black ${ui.productPromo.matchLevel === 'high' ? 'text-emerald-300' : ui.productPromo.matchLevel === 'medium' ? 'text-amber-300' : 'text-rose-300'}`}>{Number(ui.productPromo.matchScore || 0)}점</span>
+              </p>
+              <p className="text-[10px] text-slate-400">{ui.productPromo.matchSummary || '상품 일치도 분석 대기'}</p>
+              {(ui.productPromo.matchIssues || []).length > 0 && (
+                <p className="text-[10px] text-amber-200 mt-0.5">점검: {(ui.productPromo.matchIssues || []).slice(0, 2).join(' / ')}</p>
+              )}
+            </div>
             {ui.productPromo.error && <p className="text-[11px] text-rose-300 font-bold">{ui.productPromo.error}</p>}
             {ui.productPromo.autoQueuePending && (
               <p className="text-[10px] text-amber-200">발행 자동등록 대기 중: {publishReadiness.failed.map(item => item.label).join(', ') || '요건 충족 확인 중'}</p>
