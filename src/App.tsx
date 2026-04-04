@@ -7493,7 +7493,7 @@ ${JSON.stringify(cutPayload)}`,
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-3">
           <div>
             <p className="text-xs font-black text-fuchsia-200 uppercase tracking-widest">사진 1장 상품홍보 자동 제작</p>
-            <p className="text-[11px] text-slate-400 mt-1">자동/수동 모드를 선택해 상품쇼츠를 진행합니다. 자동은 약 20초 고정, 수동은 일반 쇼츠 흐름으로 진행합니다.</p>
+            <p className="text-[11px] text-slate-400 mt-1">자동/수동 모드를 선택해 상품쇼츠를 진행합니다. 자동은 약 20초 고정, 수동 진행 버튼 클릭으로 설정을 즉시 적용합니다.</p>
           </div>
           <button
             onClick={() => {
@@ -7531,7 +7531,7 @@ ${JSON.stringify(cutPayload)}`,
             disabled={(ui.productPromo.referenceImages || []).length === 0 || ui.productPromo.running || ui.autoFlow.running}
             className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all disabled:opacity-40 ${ui.productPromo.running ? 'running-gradient text-black' : 'bg-fuchsia-500 hover:bg-fuchsia-400 text-white'}`}
           >
-            {ui.productPromo.running ? '자동 제작 중...' : productPromoPlan.workflowMode === 'auto' ? '상품홍보 자동 실행' : '수동 진행 설정 적용'}
+            {ui.productPromo.running ? '자동 제작 중...' : productPromoPlan.workflowMode === 'auto' ? '상품홍보 자동 실행' : '수동 진행 설정 적용 실행'}
           </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
@@ -7630,7 +7630,7 @@ ${JSON.stringify(cutPayload)}`,
             >
               {ui.productPromo.experimentalBgCutout ? '실험: 배경교체 지시 ON' : '실험: 배경교체 지시 OFF'}
             </button>
-            <p className="text-[10px] text-amber-200/90">실험 기능: 프롬프트 지시만 적용됩니다. 실제 픽셀 배경 제거 엔진은 아직 미적용입니다.</p>
+            <p className="text-[10px] text-amber-200/90">현재는 배경 연출 지시만 반영됩니다. 픽셀 단위 배경 제거/합성 엔진은 통합 진행 중입니다.</p>
           </div>
           <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
             <p className="text-[10px] font-black text-fuchsia-200 uppercase tracking-widest">배경음악</p>
@@ -7660,6 +7660,96 @@ ${JSON.stringify(cutPayload)}`,
               {productBgmPreviewing ? '배경음악 미리듣기 중지' : '배경음악 미리듣기'}
             </button>
             <p className="text-[10px] text-slate-500">여기서 선택한 음원이 자동 제작/렌더에 그대로 연동됩니다.</p>
+          </div>
+          <div className="rounded-xl border border-fuchsia-300/25 bg-fuchsia-500/5 p-3 space-y-2 md:col-span-2">
+            <p className="text-[10px] font-black text-fuchsia-200 uppercase tracking-widest">상품쇼츠 핵심 설정 (하단 패널 연동)</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <label className="text-[10px] text-slate-300 space-y-1">
+                <span className="font-black text-fuchsia-200 uppercase tracking-widest">영상 스타일</span>
+                <select
+                  value={ui.videoStyle.selected}
+                  onChange={(e) => setUi(prev => ({ ...prev, videoStyle: { ...prev.videoStyle, selected: e.target.value } }))}
+                  className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none"
+                >
+                  {VIDEO_STYLES_31.map(style => (
+                    <option key={style.id} value={`${style.id}. ${style.name}`}>{style.id}. {style.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-[10px] text-slate-300 space-y-1">
+                <span className="font-black text-fuchsia-200 uppercase tracking-widest">TTS 엔진</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setUi(prev => ({ ...prev, tts: { ...prev.tts, activeProvider: 'gemini' }, productPromo: { ...prev.productPromo, preferredTtsProvider: 'gemini' } }))}
+                    className={`py-2 rounded-lg text-[10px] font-black border transition-all ${ui.tts.activeProvider !== 'elevenlabs' ? 'bg-cyan-400 text-black border-cyan-300' : 'bg-slate-700 text-slate-300 border-slate-600'}`}
+                  >
+                    Gemini
+                  </button>
+                  <button
+                    onClick={() => setUi(prev => ({ ...prev, tts: { ...prev.tts, activeProvider: 'elevenlabs' }, productPromo: { ...prev.productPromo, preferredTtsProvider: 'elevenlabs' } }))}
+                    className={`py-2 rounded-lg text-[10px] font-black border transition-all ${ui.tts.activeProvider === 'elevenlabs' ? 'bg-indigo-400 text-black border-indigo-300' : 'bg-slate-700 text-slate-300 border-slate-600'}`}
+                  >
+                    ElevenLabs
+                  </button>
+                </div>
+              </label>
+              <label className="text-[10px] text-slate-300 space-y-1">
+                <span className="font-black text-fuchsia-200 uppercase tracking-widest">TTS 모델</span>
+                {ui.tts.activeProvider === 'elevenlabs' ? (
+                  <select
+                    value={ui.tts.elevenlabsModel}
+                    onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, elevenlabsModel: e.target.value } }))}
+                    className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none"
+                  >
+                    {ELEVENLABS_MODELS.map(model => (
+                      <option key={model.id} value={model.id}>{model.label}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <select
+                    value={ui.tts.model}
+                    onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, model: e.target.value } }))}
+                    className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none"
+                  >
+                    {GEMINI_TTS_ONLY_MODELS.map(model => (
+                      <option key={model.id} value={model.id}>{model.label}</option>
+                    ))}
+                  </select>
+                )}
+              </label>
+              <label className="text-[10px] text-slate-300 space-y-1">
+                <span className="font-black text-fuchsia-200 uppercase tracking-widest">목소리 / 미리듣기</span>
+                <div className="flex items-center gap-2">
+                  {ui.tts.activeProvider === 'elevenlabs' ? (
+                    <select
+                      value={ui.tts.elevenlabsVoice}
+                      onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, elevenlabsVoice: e.target.value } }))}
+                      className="flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none"
+                    >
+                      {ELEVENLABS_VOICES.map(voice => (
+                        <option key={voice.id} value={voice.id}>{voice.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <select
+                      value={ui.tts.voice}
+                      onChange={(e) => setUi(prev => ({ ...prev, tts: { ...prev.tts, voice: e.target.value } }))}
+                      className="flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none"
+                    >
+                      {GEMINI_TTS_VOICES.map(voice => (
+                        <option key={voice.id} value={voice.id}>{voice.label}</option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    onClick={() => handlePreviewVoice(ui.tts.activeProvider === 'elevenlabs' ? ui.tts.elevenlabsVoice : ui.tts.voice)}
+                    className={`px-3 py-2 rounded-lg border text-[10px] font-black transition-all ${previewingId === (ui.tts.activeProvider === 'elevenlabs' ? ui.tts.elevenlabsVoice : ui.tts.voice) ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/10 text-white border-white/15 hover:bg-white/20'}`}
+                  >
+                    {previewLoading && previewingId === (ui.tts.activeProvider === 'elevenlabs' ? ui.tts.elevenlabsVoice : ui.tts.voice) ? '로딩' : previewingId === (ui.tts.activeProvider === 'elevenlabs' ? ui.tts.elevenlabsVoice : ui.tts.voice) ? '정지' : '미리듣기'}
+                  </button>
+                </div>
+              </label>
+            </div>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
