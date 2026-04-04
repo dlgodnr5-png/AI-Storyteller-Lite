@@ -1115,6 +1115,8 @@ const drawTemplateTitleOverlay = (
     scale: number;
     subtitlePreset?: SubtitlePreset;
     maxLines?: number;
+    centerXPercent?: number;
+    widthPercent?: number;
   },
 ) => {
   const rawLines = text
@@ -1125,7 +1127,9 @@ const drawTemplateTitleOverlay = (
   const lines = rawLines.length > 0 ? rawLines.slice(0, maxLines) : [normalizeHookTitleForOverlay(text)];
   if (lines.length === 0) return;
 
-  const maxTextWidth = Math.round(width * 0.84);
+  const titleWidthPercent = Math.max(50, Math.min(100, Number(options.widthPercent || 96)));
+  const maxTextWidth = Math.round(width * (titleWidthPercent / 100));
+  const centerX = Math.round(width * (Math.max(5, Math.min(95, Number(options.centerXPercent || 50))) / 100));
   const wrapLineByWidth = (input: string) => {
     const chars = Array.from(String(input || ''));
     const wrapped: string[] = [];
@@ -1188,7 +1192,7 @@ const drawTemplateTitleOverlay = (
     const parts = line.split(/(\s+)/);
     const widths = parts.map(part => ctx.measureText(part).width);
     const totalWidth = widths.reduce((sum, w) => sum + w, 0);
-    let x = width / 2 - totalWidth / 2;
+    let x = centerX - totalWidth / 2;
     parts.forEach((part, idx) => {
       if (!part) return;
       const token = cleanWordToken(part);
@@ -1387,6 +1391,7 @@ const drawSubtitleOverlay = (
     progress?: number;
     entryAnimation?: SubtitleEntryAnimation;
     subtitleScale?: number;
+    xPercent?: number;
   },
 ) => {
   const rendered = lines.filter(Boolean).slice(0, 2);
@@ -1396,12 +1401,13 @@ const drawSubtitleOverlay = (
   const progress = Math.max(0, Math.min(1, options?.progress ?? 1));
   const entryAnimation = options?.entryAnimation || 'none';
 
+  const centerX = Math.round(width * (Math.max(6, Math.min(94, Number(options?.xPercent || 50))) / 100));
   const drawLine = (line: string, y: number) => {
     ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.12));
     ctx.strokeStyle = preset.strokeColor;
-    ctx.strokeText(line, width / 2, y);
+    ctx.strokeText(line, centerX, y);
     ctx.fillStyle = preset.textColor;
-    ctx.fillText(line, width / 2, y);
+    ctx.fillText(line, centerX, y);
   };
 
   const subtitleScale = Math.max(0.7, Math.min(2.2, Number(options?.subtitleScale || 1)));
@@ -1435,7 +1441,9 @@ const drawSubtitleOverlay = (
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  drawRoundedRect(ctx, Math.round(width * 0.08), y, Math.round(width * 0.84), blockHeight, 18);
+  const boxW = Math.round(width * 0.84);
+  const boxX = Math.max(Math.round(width * 0.04), Math.min(Math.round(width * 0.96) - boxW, Math.round(centerX - boxW / 2)));
+  drawRoundedRect(ctx, boxX, y, boxW, blockHeight, 18);
   ctx.fillStyle = preset.boxColor;
   ctx.fill();
 
@@ -1713,6 +1721,7 @@ const drawSlideToCanvas = (
     widthPct?: number;
     heightPct?: number;
     radiusPx?: number;
+    rotateDeg?: number;
   },
 ) => {
   const animation = SLIDE_MOTION_ANIMATION[motion];
@@ -1734,6 +1743,7 @@ const drawSlideToCanvas = (
   const frameW = Math.max(1, Math.round(width * Math.max(1, Math.min(100, Number(container?.widthPct ?? 100))) / 100));
   const frameH = Math.max(1, Math.round(height * Math.max(1, Math.min(100, Number(container?.heightPct ?? 100))) / 100));
   const frameRadius = Math.max(0, Number(container?.radiusPx ?? 0));
+  const rotateDeg = Number(container?.rotateDeg || 0);
 
   const coverScale = Math.max(frameW / image.width, frameH / image.height);
   const drawWidth = image.width * coverScale * scale;
@@ -1752,6 +1762,13 @@ const drawSlideToCanvas = (
     ctx.rect(frameX, frameY, frameW, frameH);
   }
   ctx.clip();
+  if (rotateDeg) {
+    const cx = frameX + frameW / 2;
+    const cy = frameY + frameH / 2;
+    ctx.translate(cx, cy);
+    ctx.rotate((rotateDeg * Math.PI) / 180);
+    ctx.translate(-cx, -cy);
+  }
   ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
   ctx.restore();
 };
@@ -1767,6 +1784,7 @@ const drawVideoFrameToCanvas = (
     widthPct?: number;
     heightPct?: number;
     radiusPx?: number;
+    rotateDeg?: number;
   },
 ) => {
   if (!video.videoWidth || !video.videoHeight) return;
@@ -1776,6 +1794,7 @@ const drawVideoFrameToCanvas = (
   const frameW = Math.max(1, Math.round(width * Math.max(1, Math.min(100, Number(container?.widthPct ?? 100))) / 100));
   const frameH = Math.max(1, Math.round(height * Math.max(1, Math.min(100, Number(container?.heightPct ?? 100))) / 100));
   const frameRadius = Math.max(0, Number(container?.radiusPx ?? 0));
+  const rotateDeg = Number(container?.rotateDeg || 0);
 
   const mediaRatio = video.videoWidth / video.videoHeight;
   const canvasRatio = frameW / frameH;
@@ -1803,6 +1822,13 @@ const drawVideoFrameToCanvas = (
     ctx.rect(frameX, frameY, frameW, frameH);
   }
   ctx.clip();
+  if (rotateDeg) {
+    const cx = frameX + frameW / 2;
+    const cy = frameY + frameH / 2;
+    ctx.translate(cx, cy);
+    ctx.rotate((rotateDeg * Math.PI) / 180);
+    ctx.translate(-cx, -cy);
+  }
   ctx.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, frameX, frameY, frameW, frameH);
   ctx.restore();
 };
@@ -1990,6 +2016,7 @@ export default function App() {
       subtitleScale: 1,
       subtitlePosition: 'bottom' as SubtitlePosition,
       subtitleGridPosition: 7,
+      subtitleXPercent: 50,
       subtitlePreset: 'shorts' as SubtitlePreset,
       subtitleWordHighlight: false,
       subtitleHighlightStrength: 'low' as SubtitleHighlightStrength,
@@ -2004,6 +2031,8 @@ export default function App() {
       templateTitleText: '',
       templateTitleFontFamily: '아네모네',
       templateTitleMaxLines: 2,
+      templateTitleXPercent: 50,
+      templateTitleWidthPercent: 96,
       templateTitleLine1TopMm: 60,
       templateTitleLine2BottomMm: 96,
       templateTitleLine1Color: '#ef4444',
@@ -2018,6 +2047,7 @@ export default function App() {
       videoContainerWidthPercent: 100,
       videoContainerHeightPercent: 100,
       videoContainerRadiusPx: 0,
+      videoContainerRotateDeg: 0,
       textOverlays: [] as Array<{
         id: string;
         text: string;
@@ -6530,6 +6560,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
         widthPct: Number(ui.finalVideo.videoContainerWidthPercent || 100),
         heightPct: Number(ui.finalVideo.videoContainerHeightPercent || 100),
         radiusPx: Number(ui.finalVideo.videoContainerRadiusPx || 0),
+        rotateDeg: Number(ui.finalVideo.videoContainerRotateDeg || 0),
       };
       const pauseVideo = (cut: number) => {
         if (cut < 0) return;
@@ -6679,6 +6710,8 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
                 scale: ui.finalVideo.templateTitleScale,
                 subtitlePreset: ui.finalVideo.subtitlePreset,
                 maxLines: ui.finalVideo.templateTitleMaxLines,
+                centerXPercent: ui.finalVideo.templateTitleXPercent,
+                widthPercent: ui.finalVideo.templateTitleWidthPercent,
               },
             );
           }
@@ -6701,6 +6734,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
                   progress: segmentProgress,
                   entryAnimation: ui.finalVideo.subtitleEntryAnimation,
                   subtitleScale: ui.finalVideo.subtitleScale,
+                  xPercent: ui.finalVideo.subtitleXPercent,
                 },
               );
             }

@@ -31,6 +31,21 @@ const SUBTITLE_STYLE_SWATCH: Record<string, string> = {
   neon: 'from-cyan-400 to-indigo-500',
 };
 
+const CONTAINER_RATIO_PRESETS = [
+  '9:16',
+  '1:1',
+  '1:2',
+  '2:1',
+  '2:3',
+  '3:2',
+  '3:4',
+  '4:3',
+  '4:5',
+  '5:4',
+  '15:9',
+  '16:9',
+];
+
 const mmToPxScaled = (mm: number, width: number) => mm * MM_TO_PX_1080 * (width / 1080);
 
 const normalizeSubtitleText = (text: string) => String(text || '').replace(/\s+/g, ' ').trim();
@@ -211,7 +226,6 @@ export default function Panel12Section(props: Props) {
     isOneClickFixed,
   } = props;
 
-  const [previewTemplateId, setPreviewTemplateId] = React.useState<string>(BUILTIN_SUBTITLE_TEMPLATES[0]?.id || '');
   const [templateTitleManualEdited, setTemplateTitleManualEdited] = React.useState(false);
   const previewAudioRef = React.useRef<HTMLAudioElement | null>(null);
   const previewFrameRef = React.useRef<HTMLDivElement | null>(null);
@@ -220,7 +234,6 @@ export default function Panel12Section(props: Props) {
   const [previewGuideMode, setPreviewGuideMode] = React.useState<'shorts' | 'reels' | 'tiktok'>('shorts');
   const [previewFrameWidth, setPreviewFrameWidth] = React.useState(360);
   const [selectedSlotCut, setSelectedSlotCut] = React.useState<number | null>(null);
-  const previewTemplate = BUILTIN_SUBTITLE_TEMPLATES.find(t => t.id === previewTemplateId) || BUILTIN_SUBTITLE_TEMPLATES[0];
   const maxHookVideoCount = Math.max(1, ui.cuts.items?.length || 1);
   const resolvedBgmTrack = String(
     (isOneClickFixed ? (ui.autoFlow?.fixed?.bgmTrack || '') : '') ||
@@ -252,18 +265,20 @@ export default function Panel12Section(props: Props) {
     const topMm = Math.max(0, Number(ui.finalVideo.templateTitleLine1TopMm || 20));
     const topPx = mmToPxScaled(topMm, width);
     const topPercent = Math.max(1, Math.min(95, (topPx / Math.max(1, height)) * 100));
+    const xPercent = Math.max(5, Math.min(95, Number(ui.finalVideo.templateTitleXPercent || 50)));
+    const widthPercent = Math.max(50, Math.min(100, Number(ui.finalVideo.templateTitleWidthPercent || 96)));
 
     if (lines.length === 0) {
-      return { lines: [] as string[], fontPx: 10, lineHeightPx: 12, topPercent };
+      return { lines: [] as string[], fontPx: 10, lineHeightPx: 12, topPercent, xPercent, widthPercent };
     }
 
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) {
-      return { lines: lines.slice(0, 2), fontPx: 10, lineHeightPx: 12, topPercent };
+      return { lines: lines.slice(0, 2), fontPx: 10, lineHeightPx: 12, topPercent, xPercent, widthPercent };
     }
 
-    const maxTextWidth = Math.round(width * 0.84);
+    const maxTextWidth = Math.round(width * (widthPercent / 100));
     const wrapLineByWidth = (input: string) => {
       const chars = Array.from(String(input || ''));
       const wrapped: string[] = [];
@@ -318,6 +333,8 @@ export default function Panel12Section(props: Props) {
       fontPx: Math.max(10, Math.round(fontPx)),
       lineHeightPx: Math.max(12, Math.round(metrics.lineHeight)),
       topPercent,
+      xPercent,
+      widthPercent,
     };
   }, [
     previewFrameWidth,
@@ -327,6 +344,8 @@ export default function Panel12Section(props: Props) {
     ui.finalVideo.templateTitleLine1TopMm,
     ui.finalVideo.templateTitleLine2BottomMm,
     ui.finalVideo.templateTitleMaxLines,
+    ui.finalVideo.templateTitleXPercent,
+    ui.finalVideo.templateTitleWidthPercent,
     ui.finalVideo.subtitlePreset,
     SUBTITLE_PRESETS,
   ]);
@@ -377,12 +396,15 @@ export default function Panel12Section(props: Props) {
     const w = Math.max(5, Math.min(100 - x, Number(ui.finalVideo.videoContainerWidthPercent || 100)));
     const h = Math.max(5, Math.min(100 - y, Number(ui.finalVideo.videoContainerHeightPercent || 100)));
     const radius = Math.max(0, Number(ui.finalVideo.videoContainerRadiusPx || 0));
+    const rotateDeg = Number(ui.finalVideo.videoContainerRotateDeg || 0);
     return {
       left: `${x}%`,
       top: `${y}%`,
       width: `${w}%`,
       height: `${h}%`,
       borderRadius: `${radius}px`,
+      transform: `rotate(${rotateDeg}deg)`,
+      transformOrigin: 'center center',
     };
   }, [
     ui.finalVideo.videoContainerXPercent,
@@ -390,12 +412,41 @@ export default function Panel12Section(props: Props) {
     ui.finalVideo.videoContainerWidthPercent,
     ui.finalVideo.videoContainerHeightPercent,
     ui.finalVideo.videoContainerRadiusPx,
+    ui.finalVideo.videoContainerRotateDeg,
   ]);
 
   const jumpToEditorSection = (id: string) => {
     const target = document.getElementById(id);
     if (!target) return;
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const applyVideoContainerRatioPreset = (ratio: string) => {
+    const [rwRaw, rhRaw] = String(ratio || '9:16').split(':').map(v => Number(v));
+    const rw = Math.max(0.1, rwRaw || 9);
+    const rh = Math.max(0.1, rhRaw || 16);
+    const frameRatio = 9 / 16;
+    const targetRatio = rw / rh;
+    const maxBox = 94;
+    let widthPct = maxBox;
+    let heightPct = maxBox;
+    if (targetRatio > frameRatio) {
+      heightPct = Math.max(6, Math.round(maxBox * (frameRatio / targetRatio) * 100) / 100);
+    } else {
+      widthPct = Math.max(6, Math.round(maxBox * (targetRatio / frameRatio) * 100) / 100);
+    }
+    const xPct = Math.round(((100 - widthPct) / 2) * 100) / 100;
+    const yPct = Math.round(((100 - heightPct) / 2) * 100) / 100;
+    setUi((prev: any) => ({
+      ...prev,
+      finalVideo: {
+        ...prev.finalVideo,
+        videoContainerXPercent: xPct,
+        videoContainerYPercent: yPct,
+        videoContainerWidthPercent: widthPct,
+        videoContainerHeightPercent: heightPct,
+      },
+    }));
   };
 
   const getDragMetrics = (clientX: number, clientY: number) => {
@@ -418,6 +469,7 @@ export default function Panel12Section(props: Props) {
         ...prev,
         finalVideo: {
           ...prev.finalVideo,
+          templateTitleXPercent: Number(Math.max(5, Math.min(95, metrics.xPct)).toFixed(1)),
           templateTitleLine1TopMm: Number(metrics.mm.toFixed(1)),
           templateTitleLine2BottomMm: Math.max(Number(metrics.mm.toFixed(1)) + 24, Number(prev.finalVideo.templateTitleLine2BottomMm || 0)),
         },
@@ -429,6 +481,7 @@ export default function Panel12Section(props: Props) {
         ...prev,
         finalVideo: {
           ...prev.finalVideo,
+          subtitleXPercent: Number(Math.max(6, Math.min(94, metrics.xPct)).toFixed(1)),
           subtitleGridPosition: metrics.grid,
           subtitlePosition: metrics.grid <= 5 ? 'middle' : 'bottom',
         },
@@ -587,25 +640,6 @@ export default function Panel12Section(props: Props) {
     const volumePercent = previewAudioType === 'bgm' ? Number(ui.finalVideo.bgmVolume || 0) : Number(ui.finalVideo.sfxVolume || 0);
     previewAudioRef.current.volume = Math.min(1, Math.max(0, volumePercent / 100));
   }, [previewAudioType, ui.finalVideo.bgmVolume, ui.finalVideo.sfxVolume]);
-
-  const applyTemplateAndAutoTitle = (template: any) => {
-    applyBuiltinSubtitleTemplate(template.id);
-    setTemplateTitleManualEdited(false);
-    if (ui.selectedHookTitle) {
-      rewriteTemplateTitleFromHook();
-      return;
-    }
-    const fallbackTitle = (template.sample || template.name || '').trim();
-    if (fallbackTitle) {
-      setUi((prev: any) => ({
-        ...prev,
-        finalVideo: {
-          ...prev.finalVideo,
-          templateTitleText: fallbackTitle,
-        },
-      }));
-    }
-  };
 
   return (
     <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl">
@@ -871,95 +905,8 @@ export default function Panel12Section(props: Props) {
                   {ui.finalVideo.subtitleEnabled && (
                     <>
                       <div className="space-y-1 pt-1">
-                        <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest block">자막 템플릿</label>
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                          <div
-                            className="grid grid-cols-2 gap-2 h-[478px] overflow-y-auto custom-scrollbar pr-1"
-                            style={{ gridAutoRows: '235px' }}
-                          >
-                            {BUILTIN_SUBTITLE_TEMPLATES.map(template => {
-                              const isActive = previewTemplate?.id === template.id;
-                              const isLocked = ui.finalVideo.subtitleTemplateLockedId === template.id;
-                              return (
-                                <div
-                                  key={template.id}
-                                  onMouseEnter={() => setPreviewTemplateId(template.id)}
-                                  className={`h-full text-left border rounded-lg p-2 transition-all flex flex-col gap-2 ${isLocked ? 'bg-emerald-500/10 border-emerald-300' : isActive ? 'bg-slate-700 border-emerald-400/60' : 'bg-slate-800/80 border-white/10 hover:bg-slate-700'}`}
-                                >
-                                  <button
-                                    onClick={() => {
-                                      setPreviewTemplateId(template.id);
-                                      applyTemplateAndAutoTitle(template);
-                                    }}
-                                    className="w-full text-left flex-1"
-                                  >
-                                    <div className="aspect-video rounded-md overflow-hidden border border-white/10 bg-slate-900 relative">
-                                      <img
-                                        src={templatePreviewOverrides[template.id] || getBuiltinTemplatePreview(template)}
-                                        alt={template.name}
-                                        className="w-full h-full object-cover"
-                                        onError={(e) => {
-                                          e.currentTarget.src = `https://picsum.photos/seed/subtitle-${template.id}/640/360`;
-                                        }}
-                                      />
-                                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                                      <p className="absolute left-2 bottom-2 text-[10px] font-black text-white">{template.sample}</p>
-                                      <div className={`absolute right-2 top-2 w-4 h-4 rounded-sm border-2 ${isLocked ? 'bg-emerald-400 border-emerald-200' : 'bg-black/40 border-white/40'}`}>
-                                        {isLocked && <span className="block w-full h-full text-[10px] leading-[12px] text-black font-black text-center">✓</span>}
-                                      </div>
-                                    </div>
-                                    <p className="text-[11px] font-black text-white flex items-center justify-between gap-2 mt-2">
-                                      <span>{template.name}</span>
-                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-400/20 text-emerald-200 border border-emerald-300/25">
-                                        {template.config.subtitlePreset}
-                                      </span>
-                                    </p>
-                                    <p className="text-[9px] text-slate-300 mt-1 line-clamp-2">{template.description}</p>
-                                  </button>
-                                </div>
-                              );
-                            })}
-                          </div>
-
-                          {previewTemplate && (
-                            <div className="rounded-xl border border-emerald-400/30 bg-[#0c1628] p-3 space-y-2">
-                              <p className="text-[10px] font-black text-emerald-200 uppercase tracking-widest">템플릿 확대 미리보기</p>
-                              <div className="w-full max-w-[280px] mx-auto rounded-lg overflow-hidden border border-white/15 bg-black" style={{ aspectRatio: '9 / 16' }}>
-                                <img
-                                  src={templatePreviewOverrides[previewTemplate.id] || getBuiltinTemplatePreview(previewTemplate)}
-                                  alt={`${previewTemplate.name}-preview`}
-                                  className="w-full h-full object-cover"
-                                  onError={(e) => {
-                                    e.currentTarget.src = `https://picsum.photos/seed/subtitle-preview-${previewTemplate.id}/540/960`;
-                                  }}
-                                />
-                              </div>
-                              <p className="text-[11px] font-black text-white">{previewTemplate.name}</p>
-                              <p className="text-[10px] text-slate-300">{previewTemplate.sample}</p>
-                              <button
-                                onClick={() => applyTemplateAndAutoTitle(previewTemplate)}
-                                className="w-full bg-emerald-500 hover:bg-emerald-400 text-black text-[10px] font-black py-2 rounded-lg"
-                              >
-                                이 템플릿 적용
-                              </button>
-                              <p className="text-[10px] text-emerald-200/90 bg-emerald-500/10 border border-emerald-300/20 rounded-lg px-2 py-1.5">
-                                템플릿을 클릭하면 즉시 고정됩니다. 다른 템플릿을 클릭하면 새 템플릿으로 변경 고정됩니다.
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                        <label className="block bg-slate-800 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] font-black text-slate-100 hover:bg-slate-700 transition-all text-center cursor-pointer mt-1">
-                          템플릿 가져오기
-                          <input
-                            type="file"
-                            accept="application/json,.json"
-                            className="hidden"
-                            onChange={async (e) => {
-                              await importSubtitleTemplates(e.target.files?.[0] || null);
-                              e.currentTarget.value = '';
-                            }}
-                          />
-                        </label>
+                        <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest block">자막 스타일 (템플릿 분리)</label>
+                        <p className="text-[10px] text-slate-400">자막 스타일은 제목/영상 템플릿과 분리되어 동작합니다. 스타일 변경 시 제목 값은 유지됩니다.</p>
                         <div id="panel12-title" className="space-y-2 pt-2 border-t border-white/10">
                           <div className="flex items-center justify-between gap-2">
                             <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">템플릿 제목 오버레이</label>
@@ -1146,37 +1093,6 @@ export default function Panel12Section(props: Props) {
                             </>
                           )}
                         </div>
-                        {subtitleTemplates.length > 0 && (
-                          <div className="space-y-1 pt-1">
-                            <p className="text-[10px] text-slate-400">저장한 템플릿</p>
-                            <div className="flex flex-wrap gap-2">
-                              {subtitleTemplates.map(template => (
-                                <div key={template.name} className="flex items-center gap-1 bg-slate-900/70 border border-white/10 rounded-lg px-2 py-1">
-                                  <button
-                                    onClick={() => applySavedSubtitleTemplate(template)}
-                                    className="text-[10px] font-bold text-slate-100 hover:text-white flex flex-col items-start gap-1"
-                                  >
-                                    <span className="flex items-center gap-1">
-                                      {template.name}
-                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-400/20 text-emerald-200 border border-emerald-300/25">
-                                        {template.subtitlePreset}
-                                      </span>
-                                    </span>
-                                    <span className="text-[9px] text-slate-400 font-medium">
-                                      {PRESET_SAMPLE_TEXT[template.subtitlePreset]}
-                                    </span>
-                                  </button>
-                                  <button
-                                    onClick={() => removeSavedSubtitleTemplate(template.name)}
-                                    className="text-[10px] font-black text-rose-300 hover:text-rose-200"
-                                  >
-                                    ×
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
                         <div className="space-y-2 pt-2 border-t border-white/10">
                           <div className="flex items-center justify-between">
                             <label className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">추가 텍스트</label>
@@ -1666,8 +1582,12 @@ export default function Panel12Section(props: Props) {
                       <div
                         onMouseDown={(e) => startPreviewDrag('subtitle', null, e)}
                         onTouchStart={(e) => startPreviewTouchDrag('subtitle', null, e)}
-                        className={`absolute left-1/2 -translate-x-1/2 -translate-y-1/2 w-[84%] rounded-xl border border-white/15 ${ui.finalVideo.subtitlePreset === 'shorts' ? 'bg-black/55' : ui.finalVideo.subtitlePreset === 'docu' ? 'bg-slate-950/70' : 'bg-slate-900/65'}`}
-                        style={{ top: `${gridPositionToPercent(ui.finalVideo.subtitleGridPosition)}%`, touchAction: 'none' }}
+                        className={`absolute -translate-x-1/2 -translate-y-1/2 w-[84%] rounded-xl border border-white/15 ${ui.finalVideo.subtitlePreset === 'shorts' ? 'bg-black/55' : ui.finalVideo.subtitlePreset === 'docu' ? 'bg-slate-950/70' : 'bg-slate-900/65'}`}
+                        style={{
+                          left: `${Math.max(6, Math.min(94, Number(ui.finalVideo.subtitleXPercent || 50)))}%`,
+                          top: `${gridPositionToPercent(ui.finalVideo.subtitleGridPosition)}%`,
+                          touchAction: 'none',
+                        }}
                       >
                         <p
                           className={`font-black drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)] ${ui.finalVideo.subtitlePreset === 'shorts' ? 'text-white' : ui.finalVideo.subtitlePreset === 'docu' ? 'text-slate-100' : 'text-white'}`}
@@ -1690,8 +1610,12 @@ export default function Panel12Section(props: Props) {
                       <div
                         onMouseDown={(e) => startPreviewDrag('title', null, e)}
                         onTouchStart={(e) => startPreviewTouchDrag('title', null, e)}
-                        className="absolute left-1/2 -translate-x-1/2 cursor-move"
-                        style={{ top: `${previewTitleLayout.topPercent}%`, touchAction: 'none' }}
+                        className="absolute -translate-x-1/2 cursor-move"
+                        style={{
+                          left: `${previewTitleLayout.xPercent}%`,
+                          top: `${previewTitleLayout.topPercent}%`,
+                          touchAction: 'none',
+                        }}
                       >
                         <p
                           className="font-black tracking-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] whitespace-pre-line text-center"
@@ -1700,7 +1624,7 @@ export default function Panel12Section(props: Props) {
                             fontFamily: ui.finalVideo.templateTitleFontFamily || 'Pretendard',
                             fontSize: `${previewTitleLayout.fontPx}px`,
                             lineHeight: `${previewTitleLayout.lineHeightPx}px`,
-                            maxWidth: `${Math.round(previewFrameWidth * 0.84)}px`,
+                            maxWidth: `${Math.round(previewFrameWidth * (Number(previewTitleLayout.widthPercent || 96) / 100))}px`,
                             wordBreak: 'break-word',
                             overflowWrap: 'anywhere',
                             WebkitTextStroke: `${Math.max(1, Math.round(previewTitleLayout.fontPx * 0.12))}px ${ui.finalVideo.templateTitleStrokeColor || 'rgba(0,0,0,0.92)'}`,
