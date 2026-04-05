@@ -223,6 +223,11 @@ const PRODUCT_PROMO_AUTO_STYLE = '11. Photorealistic';
 const PRODUCT_MATCH_HIGH_THRESHOLD = 80;
 const PRODUCT_MATCH_MEDIUM_THRESHOLD = 70;
 
+const pickRandomItem = <T,>(items: T[]): T | null => {
+  if (!items.length) return null;
+  return items[Math.floor(Math.random() * items.length)] || null;
+};
+
 const splitToFixedLines = (text: string, maxLineChars: number, maxLines: number) => {
   const compact = text.replace(/\s+/g, ' ').trim();
   if (!compact) return [] as string[];
@@ -4870,6 +4875,39 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       showNotice('AI 비디오 소스가 없어 이미지 슬라이드 모드로 자동 전환합니다.', 'info', 1400);
     }
 
+    if (plan.workflowMode === 'auto') {
+      const randomStyle = pickRandomItem(VIDEO_STYLES_31.filter(s => s.id !== '00'));
+      const randomBgm = pickRandomItem(BGM_LIBRARY.filter(track => track.path !== BUDDHIST_BGM_PATH));
+      const randomGeminiVoice = pickRandomItem(GEMINI_TTS_VOICES);
+      const randomElevenVoice = pickRandomItem(ELEVENLABS_VOICES);
+      const provider: 'gemini' | 'elevenlabs' = keys.e11 ? (Math.random() < 0.5 ? 'elevenlabs' : 'gemini') : 'gemini';
+
+      setUi(prev => ({
+        ...prev,
+        videoStyle: {
+          ...prev.videoStyle,
+          selected: randomStyle ? `${randomStyle.id}. ${randomStyle.name}` : prev.videoStyle.selected,
+        },
+        tts: {
+          ...prev.tts,
+          activeProvider: provider,
+          voice: provider === 'gemini' ? (randomGeminiVoice?.id || prev.tts.voice) : prev.tts.voice,
+          elevenlabsVoice: provider === 'elevenlabs' ? (randomElevenVoice?.id || prev.tts.elevenlabsVoice) : prev.tts.elevenlabsVoice,
+        },
+        productPromo: {
+          ...prev.productPromo,
+          preferredTtsProvider: provider,
+        },
+        finalVideo: {
+          ...prev.finalVideo,
+          bgmEnabled: Boolean(randomBgm?.path),
+          bgmTrack: randomBgm?.path || prev.finalVideo.bgmTrack,
+          bgmTrackUserSelected: true,
+          sfxEnabled: false,
+        },
+      }));
+    }
+
     const seedImageUrl = String(latestUiRef.current?.productPromo?.imageUrl || '').trim();
     if (seedImageUrl) {
       setUi(prev => {
@@ -5198,6 +5236,43 @@ JSON만 반환:
     } catch (err: any) {
       console.error(err);
       const rawMessage = String(err?.message || '알 수 없는 오류');
+      const fallbackSeedImage = String(latestUiRef.current?.productPromo?.imageUrl || '').trim();
+      const fallbackPlan = resolveProductPromoPlan(latestUiRef.current?.productPromo || ui.productPromo);
+      if (fallbackSeedImage) {
+        const fallbackCuts = Math.max(3, Math.min(24, Number(fallbackPlan.targetCuts || 5)));
+        const fallbackScript = (latestUiRef.current?.productPromo?.productComment || latestUiRef.current?.selectedHookTitle || '제품 소개')
+          .trim();
+        const fallbackItems = Array.from({ length: fallbackCuts }, (_, idx) => `${idx + 1}. ${fallbackScript}`);
+        setUi(prev => ({
+          ...prev,
+          cuts: {
+            ...prev.cuts,
+            items: fallbackItems,
+            prompts: fallbackItems.map((text, idx) => ({ index: idx + 1, prompt: text })),
+          },
+          imageJobs: Array.from({ length: fallbackCuts }, (_, idx) => ({ cut: idx + 1, status: '자동복구(원본 복제)', imageUrl: fallbackSeedImage })),
+          finalVideo: {
+            ...prev.finalVideo,
+            type: fallbackPlan.renderMode === 'ai_video' ? 'image_slide' : fallbackPlan.renderMode,
+          },
+          productPromo: {
+            ...prev.productPromo,
+            running: false,
+            step: '자동복구 완료',
+            error: '',
+            autoQueuePending: false,
+          },
+        }));
+        await new Promise(r => setTimeout(r, 0));
+        try {
+          await actionApiRef.current.handleGenerateFinalVideo();
+          showNotice('상품 자산이 부족해 원본 이미지를 기반으로 자동 복구 구성했습니다. 12번에서 바로 렌더하세요.', 'info', 1800);
+          appendAutoLog(`상품홍보 자동복구 완료: ${rawMessage}`);
+          return;
+        } catch {
+          // fallback continues to default error handling
+        }
+      }
       setUi(prev => ({
         ...prev,
         productPromo: {
