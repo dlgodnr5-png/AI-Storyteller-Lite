@@ -4870,6 +4870,29 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       showNotice('AI 비디오 소스가 없어 이미지 슬라이드 모드로 자동 전환합니다.', 'info', 1400);
     }
 
+    const seedImageUrl = String(latestUiRef.current?.productPromo?.imageUrl || '').trim();
+    if (seedImageUrl) {
+      setUi(prev => {
+        const targetCuts = Math.max(3, Math.min(24, Number(plan.targetCuts || 5)));
+        const hasSeedInRefs = (prev.productPromo.referenceImages || []).some((img: string) => img === seedImageUrl);
+        const nextRefs = hasSeedInRefs
+          ? (prev.productPromo.referenceImages || [])
+          : [seedImageUrl, ...(prev.productPromo.referenceImages || [])].slice(0, PRODUCT_PROMO_MAX_IMAGES);
+        const existingCuts = new Set((prev.imageJobs || []).filter((j: any) => j?.imageUrl).map((j: any) => Number(j.cut)));
+        const seededJobs = Array.from({ length: targetCuts }, (_, idx) => idx + 1)
+          .filter(cut => !existingCuts.has(cut))
+          .map(cut => ({ cut, status: '원본 시드', imageUrl: seedImageUrl }));
+        return {
+          ...prev,
+          imageJobs: seededJobs.length > 0 ? [...(prev.imageJobs || []), ...seededJobs] : prev.imageJobs,
+          productPromo: {
+            ...prev.productPromo,
+            referenceImages: nextRefs,
+          },
+        };
+      });
+    }
+
     setUi(prev => ({
       ...prev,
       productPromo: {
