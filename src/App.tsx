@@ -2241,6 +2241,8 @@ export default function App() {
   const elevenlabsVoiceMapRef = useRef<Record<string, string> | null>(null);
   const ttsProviderLockRef = useRef<'gemini' | 'elevenlabs' | null>(null);
   const runStateRef = useRef(false);
+  const productImageUploadRef = useRef<HTMLInputElement | null>(null);
+  const productImageBulkUploadRef = useRef<HTMLInputElement | null>(null);
   const taskAbortRef = useRef({
     hooks: false,
     thumbnail: false,
@@ -3985,6 +3987,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
       : prompts;
 
     const productImageUrl = String(latestUiRef.current?.productPromo?.imageUrl || '').trim();
+    const isProductPromoContext = Boolean(latestUiRef.current?.productPromo?.running);
     const productReferences = [
       ...(latestUiRef.current?.productPromo?.referenceImages || []),
       productImageUrl,
@@ -3995,6 +3998,7 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
     const canAssignOriginalByCut =
       Boolean(latestUiRef.current?.productPromo?.strictProductLock) &&
       latestUiRef.current?.productPromo?.workflowMode !== 'auto' &&
+      !isProductPromoContext &&
       productReferences.length > 1 &&
       prompts.length > 0 &&
       productReferences.length >= prompts.length;
@@ -4020,14 +4024,15 @@ JSON만 반환: {"provider":"gemini|elevenlabs","voice":"id"}`;
     for (const cut of queue) {
       if (abortRef.current) break;
       const existing = latestUiRef.current?.imageJobs?.find((j: any) => j.cut === cut.index);
-      if (existing?.imageUrl) {
+      const shouldForceRegenerate = isProductPromoContext;
+      if (existing?.imageUrl && !shouldForceRegenerate) {
         continue;
       }
       let ok = false;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         if (abortRef.current) break;
         try {
-          await generateImage(cut.index, { force: false });
+          await generateImage(cut.index, { force: shouldForceRegenerate });
           const job = latestUiRef.current?.imageJobs?.find((j: any) => j.cut === cut.index);
           if (job?.imageUrl) {
             ok = true;
@@ -7995,37 +8000,47 @@ ${JSON.stringify(cutPayload)}`,
         </div>
         <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4">
           <div className="space-y-3">
-            <label className="rounded-2xl border border-dashed border-fuchsia-300/40 bg-fuchsia-500/5 p-3 cursor-pointer hover:bg-fuchsia-500/10 transition-all min-h-[160px] flex items-center justify-center">
+            <input
+              ref={productImageUploadRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (e) => {
+                const files = Array.from(e.target.files || []);
+                await handleProductPromoImages(files);
+                e.currentTarget.value = '';
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => productImageUploadRef.current?.click()}
+              className="w-full rounded-2xl border border-dashed border-fuchsia-300/40 bg-fuchsia-500/5 p-3 cursor-pointer hover:bg-fuchsia-500/10 transition-all min-h-[160px] flex items-center justify-center"
+            >
               {ui.productPromo.imageUrl ? (
                 <img src={ui.productPromo.imageUrl} alt="product" className="w-full h-full max-h-[160px] object-cover rounded-xl" />
               ) : (
                 <span className="text-[11px] text-fuchsia-100/80 font-bold">상품 사진 업로드</span>
               )}
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={async (e) => {
-                  const files = Array.from(e.target.files || []);
-                  await handleProductPromoImages(files);
-                  e.currentTarget.value = '';
-                }}
-              />
-            </label>
-            <label className="w-full block text-center rounded-lg bg-white/10 border border-white/15 px-3 py-2 text-[11px] font-black cursor-pointer hover:bg-white/20">
+            </button>
+            <input
+              ref={productImageBulkUploadRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={async (e) => {
+                const files = Array.from(e.target.files || []);
+                await handleProductPromoImages(files);
+                e.currentTarget.value = '';
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => productImageBulkUploadRef.current?.click()}
+              className="w-full block text-center rounded-lg bg-white/10 border border-white/15 px-3 py-2 text-[11px] font-black cursor-pointer hover:bg-white/20"
+            >
               상품 이미지 추가 업로드
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={async (e) => {
-                  const files = Array.from(e.target.files || []);
-                  await handleProductPromoImages(files);
-                  e.currentTarget.value = '';
-                }}
-              />
-            </label>
+            </button>
             <div className="grid grid-cols-4 gap-1.5 max-h-24 overflow-y-auto custom-scrollbar">
               {(ui.productPromo.referenceImages || []).map((img: string, idx: number) => (
                 <button
