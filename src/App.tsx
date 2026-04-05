@@ -1008,6 +1008,13 @@ const splitSubtitleLines = (text: string, maxChars: number) => {
   return lines.slice(0, 2);
 };
 
+const getSubtitleSourceTexts = (scriptText: string, slideCount: number, cutItems: string[]) => {
+  const fromScript = normalizeSubtitleText(String(scriptText || ''));
+  if (fromScript) return [fromScript];
+  const fromCuts = (slideCount > 0 ? cutItems.slice(0, slideCount) : cutItems).filter(Boolean);
+  return fromCuts.length > 0 ? fromCuts : [''];
+};
+
 const resolveProductPromoPlan = (productPromo: any) => {
   const workflowMode = productPromo?.workflowMode === 'manual' ? 'manual' : 'auto';
   const renderMode = productPromo?.renderMode === 'ai_video' ? 'ai_video' : 'image_slide';
@@ -2421,12 +2428,12 @@ export default function App() {
   }, [ui.productPromo.referenceImages, ui.productPromo.imageUrl]);
 
   useEffect(() => {
-    const running = isAutoRunning || isManualRunning;
+    const running = ui.autoFlow.running || ui.productPromo.running;
     if (running && !runStateRef.current) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
     runStateRef.current = running;
-  }, [isAutoRunning, isManualRunning]);
+  }, [ui.autoFlow.running, ui.productPromo.running]);
 
   useEffect(() => {
     const cached = searchCacheByCountry[ui.filters.country];
@@ -2537,7 +2544,7 @@ export default function App() {
       ? Math.max(0.5, Number(ui.finalVideo.thumbnailIntroDuration || 1))
       : 0;
     const narrationDuration = ui.tts.measuredDuration > 0 ? Number(ui.tts.measuredDuration) : slideDurationTotal;
-    const subtitleSource = (slides.length > 0 ? slides.map(slide => ui.cuts.items[slide.cut - 1] || '') : ui.cuts.items).filter(Boolean);
+    const subtitleSource = getSubtitleSourceTexts(ui.script.output, slides.length, ui.cuts.items || []);
     const segments = ui.finalVideo.subtitleEnabled
       ? buildSubtitleSegments(subtitleSource, Math.max(1, narrationDuration), Math.max(12, ui.finalVideo.subtitleMaxChars))
       : [];
@@ -3235,6 +3242,12 @@ JSON 형식으로만 출력하세요:
         setUi(prev => ({ ...prev, description: { ...prev.description, generating: false } }));
         return;
       }
+      const cleanDesc = (value: string) => String(value || '')
+        .replace(/\b(자막|내레이션|narration|subtitle|description)\s*:\s*/gi, '')
+        .replace(/\s*\/\s*/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
       setUi(prev => ({ 
         ...prev, 
         description: { 
@@ -3242,9 +3255,16 @@ JSON 형식으로만 출력하세요:
           kr: {
             ...(parsed.kr || { title: '', desc: '', hashtags: '', tags: '' }),
             title: compressTitleForPublish(parsed?.kr?.title || ''),
+            desc: cleanDesc(parsed?.kr?.desc || ''),
           }, 
-          en: parsed.en || { title: '', desc: '', hashtags: '', tags: '' }, 
-          jp: parsed.jp || { title: '', desc: '', hashtags: '', tags: '' }, 
+          en: {
+            ...(parsed.en || { title: '', desc: '', hashtags: '', tags: '' }),
+            desc: cleanDesc(parsed?.en?.desc || ''),
+          }, 
+          jp: {
+            ...(parsed.jp || { title: '', desc: '', hashtags: '', tags: '' }),
+            desc: cleanDesc(parsed?.jp?.desc || ''),
+          }, 
           generating: false 
         } 
       }));
@@ -5306,8 +5326,16 @@ JSON만 반환:
       
       const fallbackPromptFromCut = (cutText: string) => {
         const seed = normalizeSubtitleText(cutText || 'product close-up scene') || 'product close-up scene';
+        const sceneCues = [
+          'person using the product in a realistic Korean daily life context',
+          'close-up hero shot with packaging and product texture details',
+          'before/after usage scene showing practical benefit clearly',
+          'social proof scene with product in natural hand-held context',
+          'strong CTA composition with product foreground and action mood',
+        ];
+        const sceneCue = sceneCues[Math.max(0, Math.min(sceneCues.length - 1, (Number(cutText.match(/^\d+/)?.[0] || 1) - 1)))];
         if (isProductPromoContext) {
-          return `Korean e-commerce commercial scene, Korean background in Seoul, Korean model, product focus on ${seed}. Keep the same product shape/color/package as reference product image. ${promoVisualAnchor ? `Product anchor: ${promoVisualAnchor}.` : ''} ${promoDetectedTexts ? `Package text hint: ${promoDetectedTexts}.` : ''} all visible text in Korean Hangul only, premium lighting, high detail, no English letters.`;
+          return `Korean e-commerce commercial scene, ${sceneCue}, product focus on ${seed}. Keep the exact same product identity (shape/color/logo/package text), change human pose and background only. ${promoVisualAnchor ? `Product anchor: ${promoVisualAnchor}.` : ''} ${promoDetectedTexts ? `Package text hint: ${promoDetectedTexts}.` : ''} all visible text in Korean Hangul only, premium lighting, high detail, no English letters.`;
         }
         return `Cinematic product advertisement scene, focus on ${seed}, premium lighting, clean background, dynamic composition, high detail, no text, no letters.`;
       };
@@ -5316,6 +5344,13 @@ JSON만 반환:
       for (let i = 0; i < ui.cuts.items.length; i++) {
         if (taskAbortRef.current.prompts) break;
         const text = ui.cuts.items[i];
+        const sceneBlueprint = [
+          'usage introduction scene with Korean person and authentic environment',
+          'problem-solution scene showing practical usage in context',
+          'close-up detail scene showing texture/logo/package clearly',
+          'lifestyle scene with different camera angle and background',
+          'purchase decision scene with emotional payoff and CTA energy',
+        ][Math.max(0, Math.min(4, i))];
         const p = `당신은 시각적 연출가입니다. 다음 대본의 내용을 바탕으로, 이 특정 컷에 대한 상세한 영어 이미지 프롬프트를 작성하세요.
         
 [전체 대본 맥락]
@@ -5323,6 +5358,9 @@ ${ui.script.output.substring(0, 300)}...
 
 [현재 컷 내용]
 "${text}"
+
+[컷 역할(중복 금지)]
+${sceneBlueprint}
 
 [스타일 지침]
 ${stylePrompt}
@@ -5348,7 +5386,8 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
 3. 인물의 외모, 의상, 환경이 전체 영상에서 일관되게 유지되도록 묘사하세요.
 4. ${isProductPromoContext ? '한국인/한국 배경/한국어 로케일 조건을 반드시 반영하세요.' : '위 조건을 유지하세요.'}
 6. ${isProductPromoContext ? '상품 자체(형태/색/패키지/로고 텍스트)는 원본 제품 이미지와 최대한 동일하게 유지하고, 주변 환경/배경/구도만 변경하세요.' : '위 조건을 유지하세요.'}
-7. 불필요한 설명 없이 1~2문장의 영어 프롬프트만 출력하세요.`;
+7. 이전 컷과 다른 구도/행동/배경이 되도록 명시하세요. 같은 이미지가 재현되면 실패입니다.
+8. 불필요한 설명 없이 1~2문장의 영어 프롬프트만 출력하세요.`;
 
         try {
           const res = await generateContentWithFallback(ai, {
@@ -6218,13 +6257,21 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
     el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  const QUICK_PANEL_LINKS: Array<{ id: keyof typeof ui.panelsOpen; label: string }> = [
-    { id: 'p1', label: '1' },
-    { id: 'p3', label: '3' },
-    { id: 'p7', label: '8' },
-    { id: 'p11', label: '11' },
-    { id: 'p12', label: '12' },
-    { id: 'p14', label: '14' },
+  const QUICK_PANEL_LINKS: Array<{ target: keyof typeof ui.panelsOpen; label: string }> = [
+    { target: 'p1', label: '1' },
+    { target: 'p2', label: '2' },
+    { target: 'p3', label: '3' },
+    { target: 'p4', label: '4' },
+    { target: 'p_style', label: '5' },
+    { target: 'p5', label: '6' },
+    { target: 'p6', label: '7' },
+    { target: 'p7', label: '8' },
+    { target: 'p9', label: '9' },
+    { target: 'p10', label: '10' },
+    { target: 'p11', label: '11' },
+    { target: 'p12', label: '12' },
+    { target: 'p12', label: '13' },
+    { target: 'p14', label: '14' },
   ];
 
   const generateImage = async (cutIndex: number, options?: { force?: boolean }) => {
@@ -6748,7 +6795,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
 
       const subtitleSegments = ui.finalVideo.subtitleEnabled
         ? buildSubtitleSegments(
-            slides.map(slide => ui.cuts.items[slide.cut - 1] || ''),
+            getSubtitleSourceTexts(ui.script.output, slides.length, ui.cuts.items || []),
             subtitleTimelineDuration,
             Math.max(12, ui.finalVideo.subtitleMaxChars),
           )
@@ -6999,7 +7046,7 @@ ${isProductPromoContext ? '- 배경은 한국(서울/부산 등) 맥락으로 �
     const narrationDuration = ui.tts.measuredDuration > 0 ? ui.tts.measuredDuration : baseDuration;
     const estimatedTotal = Math.max(1, narrationDuration);
     const segments = buildSubtitleSegments(
-      slides.map(slide => ui.cuts.items[slide.cut - 1] || ''),
+      getSubtitleSourceTexts(ui.script.output, slides.length, ui.cuts.items || []),
       estimatedTotal,
       Math.max(12, ui.finalVideo.subtitleMaxChars),
     );
@@ -8258,10 +8305,10 @@ ${JSON.stringify(cutPayload)}`,
         <div className="flex flex-col gap-1.5 rounded-xl border border-white/15 bg-slate-950/80 backdrop-blur-xl px-1.5 py-2 shadow-lg">
           {QUICK_PANEL_LINKS.map(link => (
             <button
-              key={String(link.id)}
+              key={`${link.label}-${String(link.target)}`}
               onClick={() => {
-                setUi(prev => ({ ...prev, panelsOpen: { ...prev.panelsOpen, [link.id]: true } }));
-                jumpToPanel(link.id);
+                setUi(prev => ({ ...prev, panelsOpen: { ...prev.panelsOpen, [link.target]: true } }));
+                jumpToPanel(link.target);
               }}
               className="w-9 h-8 rounded-md text-[10px] font-black border border-white/20 text-slate-100 bg-white/5 hover:bg-cyan-500/20 hover:border-cyan-300/50"
               title={`${link.label}번 패널 이동`}
