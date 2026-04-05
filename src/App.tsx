@@ -5197,18 +5197,19 @@ JSON만 반환:
       }
     } catch (err: any) {
       console.error(err);
+      const rawMessage = String(err?.message || '알 수 없는 오류');
       setUi(prev => ({
         ...prev,
         productPromo: {
           ...prev.productPromo,
           running: false,
           step: '오류',
-          error: '상품 자동 제작에 실패했습니다. 사진이나 네트워크 상태를 확인해 주세요.',
+          error: `상품 자동 제작에 실패했습니다. 원인: ${rawMessage.slice(0, 200)}`,
           autoQueuePending: false,
         },
       }));
-      appendAutoLog('상품홍보 원클릭 실패: 자동 제작 오류');
-      showNotice('상품 자동 제작에 실패했습니다. 다시 시도해 주세요.', 'error');
+      appendAutoLog(`상품홍보 원클릭 실패: ${rawMessage}`);
+      showNotice(`상품 자동 제작 실패: ${rawMessage.slice(0, 120)}`, 'error', 1800);
     }
   };
 
