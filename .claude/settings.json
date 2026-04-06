@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(/.claude/skills/shorts-science/**)",
+      "Edit(/.claude/skills/shorts-ai-tech/**)",
+      "Edit(/.claude/skills/shorts-travel/**)",
+      "Edit(/.claude/skills/longform-story/**)",
+      "Edit(/.claude/skills/save-script/**)"
+    ]
+  }
+}
